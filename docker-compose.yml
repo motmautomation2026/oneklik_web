@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: oneklik-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - "4013:4000"
+    networks:
+      - oneklik_net
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_API_BASE_URL: ""
+    container_name: oneklik-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "4012:80"
+    networks:
+      - oneklik_net
+
+networks:
+  oneklik_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.120.0.0/24

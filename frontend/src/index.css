@@ -1,0 +1,437 @@
+/* ── Type: Inter, self-hosted ─────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Inter-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Inter-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/Inter-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/Inter-700.woff2') format('woff2');
+}
+
+/* ── Brand palette — derived from the One-Klik brand purple #CBC3E3 ─────
+   Same hue (255°) at every stop so the scale reads as one considered
+   color, not "a purple and some unrelated greys." ─────────────────────── */
+
+:root {
+  --brand-50: #f6f4fb;
+  --brand-100: #e9e5f5;
+  --brand-300: #cbc3e3;
+  --brand-600: #563da4;
+  --brand-700: #422d80;
+  --brand-900: #261e3e;
+
+  --ink: #261e3e;
+  --ink-dim: #6b6380;
+  --line: #ded9ea;
+  --page-bg: #faf9fd;
+
+  --font-sans: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --bs-primary: var(--brand-600);
+  --bs-primary-rgb: 86, 61, 164;
+  --bs-body-font-family: var(--font-sans);
+  --bs-link-color: var(--brand-600);
+  --bs-link-color-rgb: 86, 61, 164;
+  --bs-link-hover-color: var(--brand-700);
+  --bs-link-hover-color-rgb: 66, 45, 128;
+}
+
+* {
+  font-family: var(--font-sans);
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--page-bg);
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.text-body-secondary {
+  color: var(--ink-dim) !important;
+}
+
+/* ── Bootstrap component re-skin ──────────────────────────────────────
+   Bootstrap 5.3 ships buttons/badges with their own hardcoded per-
+   component variables (not a live reference to --bs-primary), so the
+   brand color has to be applied at the component level to actually
+   take effect everywhere it's used. ─────────────────────────────────── */
+
+.btn-primary {
+  --bs-btn-bg: var(--brand-600);
+  --bs-btn-border-color: var(--brand-600);
+  --bs-btn-hover-bg: var(--brand-700);
+  --bs-btn-hover-border-color: var(--brand-700);
+  --bs-btn-active-bg: var(--brand-700);
+  --bs-btn-active-border-color: var(--brand-700);
+  --bs-btn-disabled-bg: var(--brand-300);
+  --bs-btn-disabled-border-color: var(--brand-300);
+  --bs-btn-focus-box-shadow: 0 0 0 0.25rem rgba(86, 61, 164, 0.35);
+  font-weight: 500;
+}
+
+.btn-outline-primary {
+  --bs-btn-color: var(--brand-600);
+  --bs-btn-border-color: var(--brand-600);
+  --bs-btn-hover-bg: var(--brand-600);
+  --bs-btn-hover-border-color: var(--brand-600);
+  --bs-btn-active-bg: var(--brand-600);
+  --bs-btn-active-border-color: var(--brand-600);
+  --bs-btn-focus-box-shadow: 0 0 0 0.25rem rgba(86, 61, 164, 0.35);
+  font-weight: 500;
+}
+
+.btn-outline-light {
+  --bs-btn-hover-bg: rgba(255, 255, 255, 0.15);
+  --bs-btn-hover-border-color: rgba(255, 255, 255, 0.6);
+}
+
+.badge.bg-primary,
+.bg-primary {
+  background-color: var(--brand-600) !important;
+}
+
+.text-primary {
+  color: var(--brand-600) !important;
+}
+
+.border-primary-subtle {
+  border-color: var(--brand-100) !important;
+}
+
+.navbar.bg-primary {
+  background-color: var(--brand-700) !important;
+}
+
+.form-check-input:checked {
+  background-color: var(--brand-600);
+  border-color: var(--brand-600);
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--brand-300);
+  box-shadow: 0 0 0 0.25rem rgba(86, 61, 164, 0.15);
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+  background-color: var(--brand-50);
+  color: var(--brand-700);
+}
+
+a {
+  color: var(--brand-600);
+}
+a:hover {
+  color: var(--brand-700);
+}
+
+/* ── Type scale for filter labels & tables ────────────────────────────
+   Bootstrap's text-uppercase adds no letter-spacing at all, which is why
+   uppercase micro-labels ("INDUSTRY", "LOCATION"...) read as cramped
+   rather than designed. Table headers were just colored body text with
+   no actual header treatment. Both fixed here, once, globally. ──────── */
+
+label.text-uppercase,
+.text-uppercase.small {
+  font-size: 0.72rem !important;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+}
+
+.form-text {
+  font-size: 0.8rem;
+}
+
+.table {
+  font-size: 0.9rem;
+}
+
+.table thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--ink-dim) !important;
+  white-space: nowrap;
+  padding-bottom: 0.6rem;
+}
+
+.table tbody td {
+  vertical-align: middle;
+}
+
+/* ── Filter panel: a tighter, control-panel scale ─────────────────────
+   This is a sidebar of controls, not reading content — dense, consistent
+   sizing reads as "designed tool," not just default Bootstrap form sizes
+   stacked on top of each other at whatever size each component defaults to. */
+
+.filter-panel .card-body {
+  padding: 1.25rem 1.25rem 1.5rem;
+}
+
+.filter-panel label.text-uppercase {
+  font-size: 0.68rem !important;
+  margin-bottom: 0.4rem;
+}
+
+.filter-panel .form-control,
+.filter-panel .btn,
+.filter-panel .dropdown-item,
+.filter-panel .dropdown-toggle {
+  font-size: 0.84rem;
+}
+
+.filter-panel .form-control,
+.filter-panel .dropdown-toggle {
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+}
+
+.filter-panel .cost-note {
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  border-radius: 6px;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.filter-panel .cost-note p {
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+  margin: 0 0 0.4rem;
+}
+
+.filter-panel .cost-note ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.filter-panel .cost-note li {
+  font-size: 0.78rem;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.filter-panel fieldset {
+  margin-bottom: 1.1rem;
+}
+
+.filter-panel .badge {
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.filter-panel .form-text {
+  font-size: 0.74rem;
+  margin-top: 0.35rem;
+}
+
+.filter-panel button[type='submit'] {
+  font-size: 0.9rem;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+/* ── Sidebar: collapsible left nav ─────────────────────────────────── */
+
+.app-sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--brand-900);
+  display: flex;
+  flex-direction: column;
+  transition:
+    width 0.18s ease,
+    min-width 0.18s ease;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.app-sidebar.collapsed {
+  width: 64px;
+  min-width: 64px;
+}
+
+.app-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-sidebar-brand {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 1.05rem;
+}
+
+.app-sidebar-brand-short {
+  display: none;
+}
+
+.app-sidebar-toggle {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  padding: 0.3rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.app-sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.app-sidebar-nav {
+  padding: 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+}
+
+.app-sidebar-group-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 0.9rem 0.6rem 0.3rem;
+  white-space: nowrap;
+}
+
+.app-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.app-sidebar-link svg {
+  flex-shrink: 0;
+}
+
+.app-sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.app-sidebar-link.active {
+  background: var(--brand-600);
+  color: #fff;
+}
+
+/* Mobile: the sidebar becomes a slide-in overlay drawer instead of a
+   permanently visible column — even the icon-only collapsed rail would eat
+   too much of a phone's width to stay always-on. */
+@media (max-width: 767.98px) {
+  .app-sidebar,
+  .app-sidebar.collapsed {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 240px;
+    min-width: 240px;
+    z-index: 1040;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+  }
+
+  .app-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .app-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(38, 30, 62, 0.45);
+    z-index: 1035;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-sidebar-backdrop {
+    display: none;
+  }
+
+  /* Desktop-only icon rail. Deliberately scoped to this breakpoint so the
+     mobile drawer (which reuses the same `collapsed` class from
+     localStorage) always renders full labels regardless of the desktop
+     toggle's persisted state. */
+  .app-sidebar.collapsed .app-sidebar-link-label,
+  .app-sidebar.collapsed .app-sidebar-group-label,
+  .app-sidebar.collapsed .app-sidebar-brand-full {
+    display: none;
+  }
+
+  .app-sidebar.collapsed .app-sidebar-brand-short {
+    display: inline;
+  }
+}
+
+/* ── Cards & tables: a touch more definition than bare Bootstrap ────── */
+
+.card {
+  border-color: var(--line);
+}
+
+.table > thead {
+  border-bottom: 2px solid var(--line);
+}
+
+.table-hover > tbody > tr:hover > * {
+  background-color: var(--brand-50);
+}

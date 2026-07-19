@@ -1,0 +1,17 @@
+# Add this block to your existing Caddyfile on the VPS — not a standalone
+# file, just the snippet this app needs. Replace the domain with the real
+# one you're pointing at this app.
+#
+# /api/* goes to the backend container (published on host port 4013);
+# everything else goes to the frontend container (published on host port
+# 4012), which serves the built React app and handles its own SPA fallback.
+
+oneklik.example.com {
+    handle /api/* {
+        reverse_proxy localhost:4013
+    }
+
+    handle {
+        reverse_proxy localhost:4012
+    }
+}

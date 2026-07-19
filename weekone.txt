@@ -1,0 +1,7 @@
+Week 1 recap — everything verified, not just written
+Schema + RLS — 9 tables, two-tier permission model, all confirmed live against your instance
+Ledger RPC functions — hold/resolve/release/grant, all four locked to service-role only
+Concurrency test — 20 parallel holds, wallet never negative, ledger sums exactly
+Webhook-replay idempotency — purchase and promo grant both proven safe against duplicates
+Auth flow — signup, login, onboarding, dashboard, all click-tested in a real browser, and now a real signup → real email → real click → real account, working end to end
+Along the way, found and fixed one real frontend bug (the "{}" error rendering) and one real infra bug (wrong SMTP port) — both through actually running the thing, not just review

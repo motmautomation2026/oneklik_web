@@ -1,0 +1,32 @@
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import pino from "pino";
+import { pinoHttp } from "pino-http";
+import companySearchRouter from "./routes/companySearch.js";
+import peopleSearchRouter from "./routes/peopleSearch.js";
+import emailRevealRouter from "./routes/emailReveal.js";
+import phoneRevealRouter from "./routes/phoneReveal.js";
+import linkedinLookupRouter from "./routes/linkedinLookup.js";
+
+const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use(pinoHttp({ logger }));
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.use("/api", companySearchRouter);
+app.use("/api", peopleSearchRouter);
+app.use("/api", emailRevealRouter);
+app.use("/api", phoneRevealRouter);
+app.use("/api", linkedinLookupRouter);
+
+const port = Number(process.env.PORT ?? 4000);
+app.listen(port, () => {
+  logger.info(`api listening on :${port}`);
+});

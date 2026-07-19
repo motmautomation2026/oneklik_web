@@ -2,16 +2,10 @@
 # file, just the snippet this app needs. Replace the domain with the real
 # one you're pointing at this app.
 #
-# /api/* goes to the backend container (published on host port 4013);
-# everything else goes to the frontend container (published on host port
-# 4012), which serves the built React app and handles its own SPA fallback.
+# Nginx inside the frontend container handles the /api split internally
+# (proxying to the backend over the Docker network), so Caddy only needs
+# to know about one upstream: the frontend's published port.
 
 oneklik.example.com {
-    handle /api/* {
-        reverse_proxy localhost:4013
-    }
-
-    handle {
-        reverse_proxy localhost:4012
-    }
+    reverse_proxy localhost:4012
 }

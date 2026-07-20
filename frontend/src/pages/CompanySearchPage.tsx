@@ -21,7 +21,19 @@ import { apiPost } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
 
-const SIZE_OPTIONS = ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10000", "10001+"];
+const SIZE_OPTIONS = [
+  "1-10",
+  "11-20",
+  "21-50",
+  "51-100",
+  "101-200",
+  "201-500",
+  "501-1000",
+  "1001-2000",
+  "2001-5000",
+  "5001-10000",
+  "10000+",
+];
 
 function SizeDropdown({ values, onChange }: { values: string[]; onChange: (v: string[]) => void }) {
   function toggle(opt: string) {

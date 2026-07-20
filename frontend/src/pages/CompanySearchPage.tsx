@@ -35,6 +35,14 @@ const SIZE_OPTIONS = [
   "10000+",
 ];
 
+async function fetchProspeoSuggestions(type: "industry" | "location", query: string): Promise<string[]> {
+  const result = await apiPost<{ suggestions: string[] }>("/api/prospeo/suggestions", { query, type });
+  return result.suggestions;
+}
+
+const fetchIndustrySuggestions = (query: string) => fetchProspeoSuggestions("industry", query);
+const fetchLocationSuggestions = (query: string) => fetchProspeoSuggestions("location", query);
+
 function SizeDropdown({ values, onChange }: { values: string[]; onChange: (v: string[]) => void }) {
   function toggle(opt: string) {
     onChange(values.includes(opt) ? values.filter((v) => v !== opt) : [...values, opt]);
@@ -186,6 +194,7 @@ export default function CompanySearchPage() {
                     values={industries}
                     onChange={setIndustries}
                     placeholder="Type an industry, press Enter"
+                    fetchSuggestions={fetchIndustrySuggestions}
                   />
 
                   <TagInput
@@ -193,6 +202,7 @@ export default function CompanySearchPage() {
                     values={locations}
                     onChange={setLocations}
                     placeholder="Add a location, press Enter"
+                    fetchSuggestions={fetchLocationSuggestions}
                   />
 
                   <fieldset className="mb-3">

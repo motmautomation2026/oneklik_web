@@ -43,6 +43,14 @@ function creditsForCount(count: number): number {
   return Math.max(1, Math.ceil(count / 25));
 }
 
+async function fetchProspeoSuggestions(type: "location" | "job_title", query: string): Promise<string[]> {
+  const result = await apiPost<{ suggestions: string[] }>("/api/prospeo/suggestions", { query, type });
+  return result.suggestions;
+}
+
+const fetchLocationSuggestions = (query: string) => fetchProspeoSuggestions("location", query);
+const fetchJobTitleSuggestions = (query: string) => fetchProspeoSuggestions("job_title", query);
+
 export default function PeopleSearchPage() {
   const { user } = useAuth();
 
@@ -216,6 +224,7 @@ export default function PeopleSearchPage() {
                     values={jobTitles}
                     onChange={setJobTitles}
                     placeholder="e.g. VP Sales, press Enter"
+                    fetchSuggestions={fetchJobTitleSuggestions}
                   />
 
                   <TagInput
@@ -223,6 +232,7 @@ export default function PeopleSearchPage() {
                     values={locations}
                     onChange={setLocations}
                     placeholder="Add a location, press Enter"
+                    fetchSuggestions={fetchLocationSuggestions}
                   />
 
                   <ClampedNumberInput

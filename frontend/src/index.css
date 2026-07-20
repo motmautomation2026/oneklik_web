@@ -258,6 +258,32 @@ label.text-uppercase,
   margin-bottom: 1.1rem;
 }
 
+/* ── Tag input suggestions dropdown ───────────────────────────────── */
+
+.tag-suggest-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(38, 30, 62, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tag-suggest-item {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.tag-suggest-item:hover {
+  background: var(--brand-50);
+}
+
 .filter-panel .badge {
   font-size: 0.72rem;
   font-weight: 500;

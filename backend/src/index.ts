@@ -8,6 +8,7 @@ import peopleSearchRouter from "./routes/peopleSearch.js";
 import emailRevealRouter from "./routes/emailReveal.js";
 import phoneRevealRouter from "./routes/phoneReveal.js";
 import linkedinLookupRouter from "./routes/linkedinLookup.js";
+import prospeoSuggestionsRouter from "./routes/prospeoSuggestions.js";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const app = express();
@@ -25,6 +26,7 @@ app.use("/api", peopleSearchRouter);
 app.use("/api", emailRevealRouter);
 app.use("/api", phoneRevealRouter);
 app.use("/api", linkedinLookupRouter);
+app.use("/api", prospeoSuggestionsRouter);
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {

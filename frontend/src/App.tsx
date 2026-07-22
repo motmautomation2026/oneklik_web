@@ -11,6 +11,7 @@ import PeopleSearchPage from "./pages/PeopleSearchPage";
 import LinkedInLookupPage from "./pages/LinkedInLookupPage";
 import ListsPage from "./pages/ListsPage";
 import ListDetailPage from "./pages/ListDetailPage";
+import BuyCreditsPage from "./pages/BuyCreditsPage";
 
 function App() {
   return (
@@ -73,6 +74,14 @@ function App() {
             element={
               <RequireAuth requireOnboarded>
                 <ListDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/buy-credits"
+            element={
+              <RequireAuth requireOnboarded>
+                <BuyCreditsPage />
               </RequireAuth>
             }
           />

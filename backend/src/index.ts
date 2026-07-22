@@ -14,13 +14,21 @@ import listPhoneRevealRouter from "./routes/listPhoneReveal.js";
 import linkedinLookupRouter from "./routes/linkedinLookup.js";
 import prospeoSuggestionsRouter from "./routes/prospeoSuggestions.js";
 import mergeListsRouter from "./routes/mergeLists.js";
+import razorpayWebhookRouter from "./routes/razorpayWebhook.js";
+import paymentsCheckoutRouter from "./routes/paymentsCheckout.js";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const app = express();
 
 app.use(cors());
-app.use(express.json());
 app.use(pinoHttp({ logger }));
+
+// Registered before express.json() deliberately — this route needs the raw
+// request body (for HMAC signature verification), and once express.json()
+// consumes the body as parsed JSON, the original bytes are gone.
+app.use("/api", razorpayWebhookRouter);
+
+app.use(express.json());
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -37,6 +45,7 @@ app.use("/api", listPhoneRevealRouter);
 app.use("/api", linkedinLookupRouter);
 app.use("/api", prospeoSuggestionsRouter);
 app.use("/api", mergeListsRouter);
+app.use("/api", paymentsCheckoutRouter);
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {

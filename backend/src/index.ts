@@ -4,7 +4,9 @@ import cors from "cors";
 import pino from "pino";
 import { pinoHttp } from "pino-http";
 import companySearchRouter from "./routes/companySearch.js";
+import companySearchAiRouter from "./routes/companySearchAi.js";
 import peopleSearchRouter from "./routes/peopleSearch.js";
+import peopleSearchAiRouter from "./routes/peopleSearchAi.js";
 import emailRevealRouter from "./routes/emailReveal.js";
 import phoneRevealRouter from "./routes/phoneReveal.js";
 import linkedinLookupRouter from "./routes/linkedinLookup.js";
@@ -22,7 +24,9 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api", companySearchRouter);
+app.use("/api", companySearchAiRouter);
 app.use("/api", peopleSearchRouter);
+app.use("/api", peopleSearchAiRouter);
 app.use("/api", emailRevealRouter);
 app.use("/api", phoneRevealRouter);
 app.use("/api", linkedinLookupRouter);

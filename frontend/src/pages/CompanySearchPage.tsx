@@ -97,6 +97,9 @@ export default function CompanySearchPage() {
   const [sizes, setSizes] = useState<string[]>([]);
   const [companyCount, setCompanyCount] = useState(10);
 
+  const [aiMode, setAiMode] = useState(false);
+  const [sentence, setSentence] = useState("");
+
   const [companies, setCompanies] = useState<Company[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -127,6 +130,25 @@ export default function CompanySearchPage() {
       setHasSearched(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAiSearch(e: FormEvent) {
+    e.preventDefault();
+    if (!sentence.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await apiPost<{ companies: Company[] }>("/api/hv/company-search-ai", {
+        sentence: sentence.trim(),
+      });
+      setCompanies(result.companies);
+      setHasSearched(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI search failed");
     } finally {
       setLoading(false);
     }
@@ -188,52 +210,99 @@ export default function CompanySearchPage() {
           <Col xs={12} lg={3}>
             <Card className="shadow-sm border-primary-subtle filter-panel">
               <Card.Body>
-                <Form onSubmit={handleSearch}>
-                  <TagInput
-                    label="Industry"
-                    values={industries}
-                    onChange={setIndustries}
-                    placeholder="Type an industry, press Enter"
-                    fetchSuggestions={fetchIndustrySuggestions}
-                  />
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <span className="fw-semibold small text-uppercase text-primary">Filters</span>
+                  <Button
+                    size="sm"
+                    variant={aiMode ? "primary" : "outline-primary"}
+                    onClick={() => {
+                      setAiMode((v) => !v);
+                      setError(null);
+                    }}
+                  >
+                    AI Mode
+                  </Button>
+                </div>
 
-                  <TagInput
-                    label="Location"
-                    values={locations}
-                    onChange={setLocations}
-                    placeholder="Add a location, press Enter"
-                    fetchSuggestions={fetchLocationSuggestions}
-                  />
+                {aiMode ? (
+                  <Form onSubmit={handleAiSearch}>
+                    <Form.Group className="mb-3">
+                      <Form.Label className="fw-semibold small text-uppercase text-primary">
+                        Describe what you need
+                      </Form.Label>
+                      <Form.Control
+                        as="textarea"
+                        rows={5}
+                        placeholder="e.g. Automotive companies in Pune with 500+ employees"
+                        value={sentence}
+                        onChange={(e) => setSentence(e.target.value)}
+                      />
+                      <Form.Text>Up to 25 companies · 1 credit if anything is found, free otherwise.</Form.Text>
+                    </Form.Group>
 
-                  <fieldset className="mb-3">
-                    <Form.Label className="fw-semibold small text-uppercase text-primary">Company size</Form.Label>
-                    <SizeDropdown values={sizes} onChange={setSizes} />
-                  </fieldset>
+                    {error && <Alert variant="danger">{error}</Alert>}
 
-                  <ClampedNumberInput
-                    label="Companies to fetch"
-                    value={companyCount}
-                    onChange={setCompanyCount}
-                    min={1}
-                    max={100}
-                    helpText={
-                      <>
-                        Estimated cost: <strong>{creditsForCount(companyCount)}</strong> credit
-                        {creditsForCount(companyCount) > 1 ? "s" : ""}
-                      </>
-                    }
-                  />
+                    <Button type="submit" variant="primary" className="w-100" disabled={!sentence.trim() || loading}>
+                      {loading ? (
+                        <>
+                          <Spinner animation="border" size="sm" className="me-2" />
+                          Searching…
+                        </>
+                      ) : (
+                        "Search"
+                      )}
+                    </Button>
+                  </Form>
+                ) : (
+                  <Form onSubmit={handleSearch}>
+                    <TagInput
+                      label="Industry"
+                      values={industries}
+                      onChange={setIndustries}
+                      placeholder="Type an industry, press Enter"
+                      fetchSuggestions={fetchIndustrySuggestions}
+                    />
 
-                  {error && <Alert variant="danger">{error}</Alert>}
+                    <TagInput
+                      label="Location"
+                      values={locations}
+                      onChange={setLocations}
+                      placeholder="Add a location, press Enter"
+                      fetchSuggestions={fetchLocationSuggestions}
+                    />
 
-                  {canSearch ? (
-                    findButton
-                  ) : (
-                    <OverlayTrigger overlay={<Tooltip>Pick at least one industry or location</Tooltip>}>
-                      <span className="d-block">{findButton}</span>
-                    </OverlayTrigger>
-                  )}
-                </Form>
+                    <fieldset className="mb-3">
+                      <Form.Label className="fw-semibold small text-uppercase text-primary">
+                        Company size
+                      </Form.Label>
+                      <SizeDropdown values={sizes} onChange={setSizes} />
+                    </fieldset>
+
+                    <ClampedNumberInput
+                      label="Companies to fetch"
+                      value={companyCount}
+                      onChange={setCompanyCount}
+                      min={1}
+                      max={100}
+                      helpText={
+                        <>
+                          Estimated cost: <strong>{creditsForCount(companyCount)}</strong> credit
+                          {creditsForCount(companyCount) > 1 ? "s" : ""}
+                        </>
+                      }
+                    />
+
+                    {error && <Alert variant="danger">{error}</Alert>}
+
+                    {canSearch ? (
+                      findButton
+                    ) : (
+                      <OverlayTrigger overlay={<Tooltip>Pick at least one industry or location</Tooltip>}>
+                        <span className="d-block">{findButton}</span>
+                      </OverlayTrigger>
+                    )}
+                  </Form>
+                )}
               </Card.Body>
             </Card>
           </Col>
@@ -260,7 +329,11 @@ export default function CompanySearchPage() {
                 )}
 
                 {!hasSearched && !loading && (
-                  <p className="text-body-secondary">Set your filters and click Find Companies to get started.</p>
+                  <p className="text-body-secondary">
+                    {aiMode
+                      ? "Describe what you're looking for and click Search."
+                      : "Set your filters and click Find Companies to get started."}
+                  </p>
                 )}
 
                 {loading && (

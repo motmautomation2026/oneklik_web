@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { normalizeCompany, extractRows, type Company } from "../lib/companyNormalize.js";
 
 const router = Router();
 
@@ -12,36 +13,6 @@ interface CompanySearchBody {
   locations?: string[];
   company_size?: string[];
   company_count?: number;
-}
-
-interface NormalizedCompany {
-  Company: string;
-  Website: string;
-  Location: string;
-  Industry: string;
-  Headcount: string;
-  Phone: string;
-  LinkedIn: string;
-}
-
-function pick(row: Record<string, unknown>, ...keys: string[]): string {
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function normalizeCompany(row: Record<string, unknown>): NormalizedCompany {
-  return {
-    Company: pick(row, "Company", "COMPANY", "company"),
-    Website: pick(row, "Website", "WEBSITE", "website"),
-    Location: pick(row, "Location", "LOCATION", "location"),
-    Industry: pick(row, "Industry", "INDUSTRY", "industry"),
-    Headcount: pick(row, "Headcount", "HEADCOUNT", "headcount"),
-    Phone: pick(row, "Phone", "PHONE", "phone"),
-    LinkedIn: pick(row, "LinkedIn", "LINKEDIN", "linkedin"),
-  };
 }
 
 router.post("/hv/company-search", requireAuth, async (req: Request, res: Response) => {
@@ -104,7 +75,7 @@ router.post("/hv/company-search", requireAuth, async (req: Request, res: Respons
     });
   }
 
-  let companies: NormalizedCompany[] = [];
+  let companies: Company[] = [];
   let n8nFailed = false;
 
   try {
@@ -119,13 +90,7 @@ router.post("/hv/company-search", requireAuth, async (req: Request, res: Respons
       n8nFailed = true;
     } else {
       const data: unknown = await n8nRes.json();
-      const rows: unknown[] = Array.isArray(data)
-        ? data
-        : Array.isArray((data as Record<string, unknown>)?.companies)
-          ? ((data as Record<string, unknown>).companies as unknown[])
-          : Array.isArray((data as Record<string, unknown>)?.data)
-            ? ((data as Record<string, unknown>).data as unknown[])
-            : [];
+      const rows = extractRows(data);
       companies = rows
         .map((row) => normalizeCompany(row as Record<string, unknown>))
         .filter((c) => c.Company.length > 0)

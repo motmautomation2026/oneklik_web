@@ -59,6 +59,9 @@ export default function PeopleSearchPage() {
   const [locations, setLocations] = useState<string[]>([]);
   const [countPerCompany, setCountPerCompany] = useState(10);
 
+  const [aiMode, setAiMode] = useState(false);
+  const [sentence, setSentence] = useState("");
+
   const [people, setPeople] = useState<Person[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -96,6 +99,25 @@ export default function PeopleSearchPage() {
       setHasSearched(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAiSearch(e: FormEvent) {
+    e.preventDefault();
+    if (!sentence.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const result = await apiPost<{ people: Person[] }>("/api/hv/people-search-ai", {
+        sentence: sentence.trim(),
+      });
+      setPeople(result.people);
+      setHasSearched(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI search failed");
     } finally {
       setLoading(false);
     }
@@ -211,54 +233,99 @@ export default function PeopleSearchPage() {
           <Col xs={12} lg={3}>
             <Card className="shadow-sm border-primary-subtle filter-panel">
               <Card.Body>
-                <Form onSubmit={handleSearch}>
-                  <TagInput
-                    label="Company domains"
-                    values={domains}
-                    onChange={setDomains}
-                    placeholder="e.g. zf.com, press Enter"
-                  />
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <span className="fw-semibold small text-uppercase text-primary">Filters</span>
+                  <Button
+                    size="sm"
+                    variant={aiMode ? "primary" : "outline-primary"}
+                    onClick={() => {
+                      setAiMode((v) => !v);
+                      setError(null);
+                    }}
+                  >
+                    AI Mode
+                  </Button>
+                </div>
 
-                  <TagInput
-                    label="Job titles"
-                    values={jobTitles}
-                    onChange={setJobTitles}
-                    placeholder="e.g. VP Sales, press Enter"
-                    fetchSuggestions={fetchJobTitleSuggestions}
-                  />
+                {aiMode ? (
+                  <Form onSubmit={handleAiSearch}>
+                    <Form.Group className="mb-3">
+                      <Form.Label className="fw-semibold small text-uppercase text-primary">
+                        Describe who you need
+                      </Form.Label>
+                      <Form.Control
+                        as="textarea"
+                        rows={5}
+                        placeholder="e.g. VPs of Sales at automotive companies in Pune"
+                        value={sentence}
+                        onChange={(e) => setSentence(e.target.value)}
+                      />
+                      <Form.Text>Up to 25 people · 1 credit if anything is found, free otherwise.</Form.Text>
+                    </Form.Group>
 
-                  <TagInput
-                    label="Location"
-                    values={locations}
-                    onChange={setLocations}
-                    placeholder="Add a location, press Enter"
-                    fetchSuggestions={fetchLocationSuggestions}
-                  />
+                    {error && <Alert variant="danger">{error}</Alert>}
 
-                  <ClampedNumberInput
-                    label="Count per company"
-                    value={countPerCompany}
-                    onChange={setCountPerCompany}
-                    min={1}
-                    max={50}
-                    helpText={
-                      <>
-                        Up to {maxTotal} people · Estimated cost: <strong>{creditsForCount(maxTotal)}</strong>{" "}
-                        credit{creditsForCount(maxTotal) > 1 ? "s" : ""}
-                      </>
-                    }
-                  />
+                    <Button type="submit" variant="primary" className="w-100" disabled={!sentence.trim() || loading}>
+                      {loading ? (
+                        <>
+                          <Spinner animation="border" size="sm" className="me-2" />
+                          Searching…
+                        </>
+                      ) : (
+                        "Search"
+                      )}
+                    </Button>
+                  </Form>
+                ) : (
+                  <Form onSubmit={handleSearch}>
+                    <TagInput
+                      label="Company domains"
+                      values={domains}
+                      onChange={setDomains}
+                      placeholder="e.g. zf.com, press Enter"
+                    />
 
-                  {error && <Alert variant="danger">{error}</Alert>}
+                    <TagInput
+                      label="Job titles"
+                      values={jobTitles}
+                      onChange={setJobTitles}
+                      placeholder="e.g. VP Sales, press Enter"
+                      fetchSuggestions={fetchJobTitleSuggestions}
+                    />
 
-                  {canSearch ? (
-                    findButton
-                  ) : (
-                    <OverlayTrigger overlay={<Tooltip>Add at least one company domain</Tooltip>}>
-                      <span className="d-block">{findButton}</span>
-                    </OverlayTrigger>
-                  )}
-                </Form>
+                    <TagInput
+                      label="Location"
+                      values={locations}
+                      onChange={setLocations}
+                      placeholder="Add a location, press Enter"
+                      fetchSuggestions={fetchLocationSuggestions}
+                    />
+
+                    <ClampedNumberInput
+                      label="Count per company"
+                      value={countPerCompany}
+                      onChange={setCountPerCompany}
+                      min={1}
+                      max={50}
+                      helpText={
+                        <>
+                          Up to {maxTotal} people · Estimated cost: <strong>{creditsForCount(maxTotal)}</strong>{" "}
+                          credit{creditsForCount(maxTotal) > 1 ? "s" : ""}
+                        </>
+                      }
+                    />
+
+                    {error && <Alert variant="danger">{error}</Alert>}
+
+                    {canSearch ? (
+                      findButton
+                    ) : (
+                      <OverlayTrigger overlay={<Tooltip>Add at least one company domain</Tooltip>}>
+                        <span className="d-block">{findButton}</span>
+                      </OverlayTrigger>
+                    )}
+                  </Form>
+                )}
               </Card.Body>
             </Card>
           </Col>
@@ -335,7 +402,9 @@ export default function PeopleSearchPage() {
 
                 {!hasSearched && !loading && (
                   <p className="text-body-secondary">
-                    Add company domains and click Find People to get started.
+                    {aiMode
+                      ? "Describe who you're looking for and click Search."
+                      : "Add company domains and click Find People to get started."}
                   </p>
                 )}
 

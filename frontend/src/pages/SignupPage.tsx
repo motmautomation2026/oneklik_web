@@ -21,7 +21,7 @@ export default function SignupPage() {
       setError(authErrorMessage(error));
       return;
     }
-    navigate("/verify-email");
+    navigate("/verify-email", { state: { email } });
   }
 
   async function handleGoogle() {

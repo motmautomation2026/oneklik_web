@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Form, Modal, Spinner } from "react-bootstrap";
 import AppLayout from "../components/AppLayout";
 import { supabase } from "../lib/supabaseClient";
+import { apiPost } from "../lib/api";
 import { downloadCsv } from "../lib/csv";
 
 interface ListMeta {
@@ -36,6 +37,12 @@ const PEOPLE_COLUMNS = [
   "Phone",
 ];
 
+interface RevealResult {
+  updated_count: number;
+  already_done_count: number;
+  skipped_count: number;
+}
+
 export default function ListDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -51,6 +58,12 @@ export default function ListDetailPage() {
 
   const [showDelete, setShowDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [revealingEmail, setRevealingEmail] = useState(false);
+  const [revealingPhone, setRevealingPhone] = useState(false);
+  const [revealNotice, setRevealNotice] = useState<string | null>(null);
+  const [revealError, setRevealError] = useState<string | null>(null);
 
   async function load() {
     if (!id) return;
@@ -119,7 +132,48 @@ export default function ListDetailPage() {
     downloadCsv(`${list.name}.csv`, items.map((i) => i.data));
   }
 
+  function toggleSelected(itemId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === items.length ? new Set() : new Set(items.map((i) => i.id))));
+  }
+
+  function describeResult(field: "email" | "phone", result: RevealResult): string {
+    const parts = [`${result.updated_count} revealed`];
+    if (result.already_done_count > 0) parts.push(`${result.already_done_count} already had ${field}`);
+    if (result.skipped_count > 0) parts.push(`${result.skipped_count} skipped — not enough credits`);
+    return parts.join(" · ");
+  }
+
+  async function reRunEnrich(field: "email" | "phone") {
+    if (selected.size === 0) return;
+    const setBusy = field === "email" ? setRevealingEmail : setRevealingPhone;
+    const endpoint = field === "email" ? "/api/hv/list-email-reveal" : "/api/hv/list-phone-reveal";
+
+    setBusy(true);
+    setRevealError(null);
+    setRevealNotice(null);
+    try {
+      const result = await apiPost<RevealResult>(endpoint, { list_item_ids: Array.from(selected) });
+      setRevealNotice(describeResult(field, result));
+      setSelected(new Set());
+      await load();
+    } catch (err) {
+      setRevealError(err instanceof Error ? err.message : `${field === "email" ? "Email" : "Phone"} reveal failed`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const columns = list?.kind === "people" ? PEOPLE_COLUMNS : COMPANY_COLUMNS;
+  const isPeopleList = list?.kind === "people";
 
   return (
     <AppLayout>
@@ -143,7 +197,42 @@ export default function ListDetailPage() {
                 {list.name}
                 <Badge bg={list.kind === "company" ? "primary" : "secondary"}>{list.kind}</Badge>
               </h1>
-              <div className="d-flex gap-2">
+              <div className="d-flex gap-2 flex-wrap align-items-center">
+                {isPeopleList && selected.size > 0 && (
+                  <>
+                    <span className="small text-body-secondary">{selected.size} selected</span>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={revealingEmail}
+                      onClick={() => reRunEnrich("email")}
+                    >
+                      {revealingEmail ? (
+                        <>
+                          <Spinner animation="border" size="sm" className="me-1" />
+                          Revealing…
+                        </>
+                      ) : (
+                        "Reveal Email (2 cr each)"
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={revealingPhone}
+                      onClick={() => reRunEnrich("phone")}
+                    >
+                      {revealingPhone ? (
+                        <>
+                          <Spinner animation="border" size="sm" className="me-1" />
+                          Revealing…
+                        </>
+                      ) : (
+                        "Reveal Phone (10 cr each)"
+                      )}
+                    </Button>
+                  </>
+                )}
                 <Button size="sm" variant="outline-primary" onClick={openRename}>
                   Rename
                 </Button>
@@ -156,6 +245,17 @@ export default function ListDetailPage() {
               </div>
             </div>
 
+            {revealNotice && (
+              <Alert variant="success" dismissible onClose={() => setRevealNotice(null)}>
+                {revealNotice}
+              </Alert>
+            )}
+            {revealError && (
+              <Alert variant="danger" dismissible onClose={() => setRevealError(null)}>
+                {revealError}
+              </Alert>
+            )}
+
             <Card className="shadow-sm">
               <Card.Body>
                 {items.length === 0 ? (
@@ -165,6 +265,17 @@ export default function ListDetailPage() {
                     <table className="table table-hover align-middle">
                       <thead>
                         <tr>
+                          {isPeopleList && (
+                            <th>
+                              <input
+                                type="checkbox"
+                                className="form-check-input"
+                                checked={items.length > 0 && selected.size === items.length}
+                                onChange={toggleSelectAll}
+                                aria-label="Select all"
+                              />
+                            </th>
+                          )}
                           <th>Status</th>
                           {columns.map((col) => (
                             <th key={col}>{col}</th>
@@ -174,6 +285,17 @@ export default function ListDetailPage() {
                       <tbody>
                         {items.map((item) => (
                           <tr key={item.id}>
+                            {isPeopleList && (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input"
+                                  checked={selected.has(item.id)}
+                                  onChange={() => toggleSelected(item.id)}
+                                  aria-label={`Select row ${item.id}`}
+                                />
+                              </td>
+                            )}
                             <td>
                               <Badge bg={STATUS_VARIANT[item.enrichment_status] ?? "secondary"}>
                                 {item.enrichment_status}

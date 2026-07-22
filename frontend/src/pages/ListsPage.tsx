@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Form, Modal, Spinner } from "react-bootstrap";
 import AppLayout from "../components/AppLayout";
 import { supabase } from "../lib/supabaseClient";
+import { apiPost } from "../lib/api";
 import { useAuth } from "../lib/AuthProvider";
 
 interface ListRow {
@@ -15,6 +16,7 @@ interface ListRow {
 
 export default function ListsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [lists, setLists] = useState<ListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +27,12 @@ export default function ListsPage() {
 
   const [deleting, setDeleting] = useState<ListRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeName, setMergeName] = useState("");
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
 
   async function loadLists() {
     if (!user) return;
@@ -82,10 +90,60 @@ export default function ListsPage() {
     }
   }
 
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const selectedLists = lists.filter((l) => selected.has(l.id));
+  const selectedKinds = new Set(selectedLists.map((l) => l.kind));
+  const canMerge = selected.size >= 2 && selectedKinds.size === 1;
+
+  function openMergeModal() {
+    setMergeName(`Merged List — ${new Date().toLocaleDateString()}`);
+    setMergeError(null);
+    setShowMergeModal(true);
+  }
+
+  async function handleMerge() {
+    setMerging(true);
+    setMergeError(null);
+    try {
+      const result = await apiPost<{ list_id: string }>("/api/lists/merge", {
+        list_ids: Array.from(selected),
+        name: mergeName.trim(),
+      });
+      setShowMergeModal(false);
+      setSelected(new Set());
+      navigate(`/lists/${result.list_id}`);
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : "Could not merge lists");
+    } finally {
+      setMerging(false);
+    }
+  }
+
   return (
     <AppLayout>
       <Container fluid className="py-4 px-3 px-md-4">
-        <h1 className="h4 mb-4 text-primary">Lists</h1>
+        <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+          <h1 className="h4 mb-0 text-primary">Lists</h1>
+          {selected.size > 0 && (
+            <div className="d-flex align-items-center gap-2">
+              <span className="small text-body-secondary">{selected.size} selected</span>
+              {selectedKinds.size > 1 && (
+                <span className="small text-warning">Can only merge lists of the same type</span>
+              )}
+              <Button size="sm" variant="primary" disabled={!canMerge} onClick={openMergeModal}>
+                Merge
+              </Button>
+            </div>
+          )}
+        </div>
 
         {error && <Alert variant="danger">{error}</Alert>}
 
@@ -108,6 +166,7 @@ export default function ListsPage() {
                 <table className="table table-hover align-middle">
                   <thead>
                     <tr>
+                      <th></th>
                       <th>Name</th>
                       <th>Type</th>
                       <th>Rows</th>
@@ -118,6 +177,15 @@ export default function ListsPage() {
                   <tbody>
                     {lists.map((list) => (
                       <tr key={list.id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            className="form-check-input"
+                            checked={selected.has(list.id)}
+                            onChange={() => toggleSelected(list.id)}
+                            aria-label={`Select ${list.name}`}
+                          />
+                        </td>
                         <td className="fw-semibold">
                           <Link to={`/lists/${list.id}`}>{list.name}</Link>
                         </td>
@@ -180,6 +248,31 @@ export default function ListsPage() {
           </Button>
           <Button variant="danger" onClick={confirmDelete} disabled={deleteBusy}>
             {deleteBusy ? "Deleting…" : "Delete"}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <Modal show={showMergeModal} onHide={() => setShowMergeModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Merge {selected.size} lists</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {mergeError && <Alert variant="danger">{mergeError}</Alert>}
+          <p className="small text-body-secondary">
+            Creates a new list containing every row from the selected lists, with duplicates removed. The original
+            lists are left untouched.
+          </p>
+          <Form.Group>
+            <Form.Label>New list name</Form.Label>
+            <Form.Control value={mergeName} onChange={(e) => setMergeName(e.target.value)} />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline-secondary" onClick={() => setShowMergeModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleMerge} disabled={merging}>
+            {merging ? "Merging…" : "Merge"}
           </Button>
         </Modal.Footer>
       </Modal>

@@ -53,6 +53,14 @@ export function normalizePerson(row: Record<string, unknown>): Person {
   };
 }
 
+function extractPersonRows(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  const obj = data as Record<string, unknown>;
+  if (Array.isArray(obj?.people)) return obj.people as Record<string, unknown>[];
+  if (Array.isArray(obj?.data)) return obj.data as Record<string, unknown>[];
+  return [];
+}
+
 export interface RevealConfig {
   webhookEnvVar: string;
   creditsPerReveal: number;
@@ -63,12 +71,153 @@ export interface RevealConfig {
   notConfiguredError: string;
 }
 
-// Shared by email and phone reveal — both are: hold credits worst-case,
-// send the whole selected batch to n8n in one call (per-row calls kept
-// hitting the n8n test-webhook "answers once per arm" limit), then resolve
-// each row's hold individually based on whether its target field came back
-// filled in the response. Only the field name, credit amount, run_type, and
-// webhook differ between the two callers.
+interface ListItemRef {
+  id: string;
+  person: Person;
+}
+
+interface CoreResult {
+  batchFailed: boolean;
+  resolved: ListItemRef[];
+  affordableCount: number;
+  creditSkippedCount: number;
+}
+
+// The actual money logic, shared by every reveal entry point (fresh
+// selection -> new list, or re-run on rows already in a saved list):
+// pre-check affordability and only hold for what's actually affordable
+// (never "hold worst-case for the whole batch, fail outright if it doesn't
+// all fit"), call the provider once for the affordable subset, then resolve
+// each row against its real found/not-found outcome.
+async function holdCallResolve(
+  req: Request,
+  userId: string,
+  listId: string,
+  items: ListItemRef[],
+  config: RevealConfig,
+): Promise<CoreResult> {
+  const { data: wallet } = await supabaseAdmin
+    .from("credit_wallets")
+    .select("available_balance")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const availableBalance = wallet?.available_balance ?? 0;
+  const maxAffordable = Math.min(items.length, Math.floor(availableBalance / config.creditsPerReveal));
+
+  if (maxAffordable === 0) {
+    return { batchFailed: false, resolved: [], affordableCount: 0, creditSkippedCount: items.length };
+  }
+
+  const toProcess = items.slice(0, maxAffordable);
+  const creditSkippedCount = items.length - maxAffordable;
+
+  const { data: run, error: runError } = await supabaseAdmin
+    .from("enrichment_runs")
+    .insert({
+      user_id: userId,
+      list_id: listId,
+      run_type: config.runType,
+      status: "pending",
+      requested_count: toProcess.length,
+    })
+    .select("id")
+    .single();
+
+  if (runError || !run) {
+    req.log.error({ err: runError }, "failed to create enrichment_run");
+    return { batchFailed: true, resolved: [], affordableCount: 0, creditSkippedCount: items.length };
+  }
+
+  const runId = run.id as string;
+
+  const { error: holdError } = await supabaseAdmin.rpc("fn_hold_credits", {
+    p_user_id: userId,
+    p_run_id: runId,
+    p_amount: toProcess.length * config.creditsPerReveal,
+  });
+
+  if (holdError) {
+    await supabaseAdmin
+      .from("enrichment_runs")
+      .update({ status: "failed", completed_at: new Date().toISOString() })
+      .eq("id", runId);
+    return { batchFailed: true, resolved: [], affordableCount: 0, creditSkippedCount: items.length };
+  }
+
+  const webhookUrl = process.env[config.webhookEnvVar] as string;
+  let responseRows: Record<string, unknown>[] = [];
+  let batchFailed = false;
+
+  try {
+    const n8nRes = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ people: toProcess.map((i) => i.person) }),
+    });
+
+    if (n8nRes.ok) {
+      const data: unknown = await n8nRes.json();
+      responseRows = extractPersonRows(data);
+    } else {
+      const bodyText = await n8nRes.text().catch(() => "");
+      req.log.error(
+        { status: n8nRes.status, body: bodyText.slice(0, 300) },
+        `${config.providerName} webhook returned non-2xx`,
+      );
+      batchFailed = true;
+    }
+  } catch (err) {
+    req.log.error({ err }, `${config.providerName} webhook call failed`);
+    batchFailed = true;
+  }
+
+  const fieldCandidates =
+    config.targetField === "Email" ? ["Email", "email", "EMAIL"] : ["Phone", "phone", "PHONE"];
+  const resolved: ListItemRef[] = [];
+
+  for (let i = 0; i < toProcess.length; i++) {
+    const item = toProcess[i];
+    const row = responseRows[i];
+
+    const value = batchFailed ? "" : pickFirstNonEmpty(...fieldCandidates.map((key) => row?.[key]));
+    const outcome: "found" | "not_found" | "error" = batchFailed ? "error" : value ? "found" : "not_found";
+    const updatedPerson: Person = { ...item.person, [config.targetField]: value };
+
+    await supabaseAdmin.from("enrichment_results").insert({
+      run_id: runId,
+      list_item_id: item.id,
+      user_id: userId,
+      provider: config.providerName,
+      outcome,
+      cost: 0,
+    });
+
+    await supabaseAdmin
+      .from("list_items")
+      .update({
+        data: updatedPerson,
+        enrichment_status: outcome === "found" ? "enriched" : outcome === "not_found" ? "not_found" : "error",
+      })
+      .eq("id", item.id);
+
+    const { error: resolveError } = await supabaseAdmin.rpc("fn_resolve_row", {
+      p_run_id: runId,
+      p_list_item_id: item.id,
+      p_outcome: outcome,
+      p_credits: config.creditsPerReveal,
+    });
+
+    if (resolveError) {
+      req.log.error({ err: resolveError }, "failed to resolve reveal row");
+    }
+
+    resolved.push({ id: item.id, person: updatedPerson });
+  }
+
+  return { batchFailed, resolved, affordableCount: maxAffordable, creditSkippedCount };
+}
+
+// Fresh selection from a live search result -> creates a brand new list.
 export async function runRevealBatch(req: Request, res: Response, config: RevealConfig) {
   const webhookUrl = process.env[config.webhookEnvVar];
   if (!webhookUrl) {
@@ -83,31 +232,6 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
   }
 
   const userId = req.user!.id;
-
-  // Pre-check affordability and truncate to what's actually affordable,
-  // rather than holding the whole selected batch's worst-case in one shot.
-  // Otherwise "2 credits available, 2 rows selected at 2cr each" holds for
-  // 4, fails outright, and reveals nothing — even though one of those two
-  // might genuinely have been affordable on its own.
-  const { data: wallet } = await supabaseAdmin
-    .from("credit_wallets")
-    .select("available_balance")
-    .eq("user_id", userId)
-    .maybeSingle();
-  const availableBalance = wallet?.available_balance ?? 0;
-  const maxAffordable = Math.min(people.length, Math.floor(availableBalance / config.creditsPerReveal));
-
-  if (maxAffordable === 0) {
-    return res.status(402).json({
-      error: `Not enough credits — need at least ${config.creditsPerReveal} to reveal even one.`,
-      people,
-      skipped_count: people.length,
-    });
-  }
-
-  const skippedCount = people.length - maxAffordable;
-  const peopleToProcess = people.slice(0, maxAffordable);
-  const peopleSkipped = people.slice(maxAffordable);
 
   const { data: list, error: listError } = await supabaseAdmin
     .from("lists")
@@ -124,141 +248,103 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
     return res.status(500).json({ error: "Could not start reveal" });
   }
 
+  const listId = list.id as string;
+
   const { data: listItems, error: itemsError } = await supabaseAdmin
     .from("list_items")
-    .insert(peopleToProcess.map((p) => ({ list_id: list.id, user_id: userId, data: p })))
+    .insert(people.map((p) => ({ list_id: listId, user_id: userId, data: p })))
     .select("id");
 
-  if (itemsError || !listItems || listItems.length !== peopleToProcess.length) {
+  if (itemsError || !listItems || listItems.length !== people.length) {
     req.log.error({ err: itemsError }, "failed to create list_items for reveal");
     return res.status(500).json({ error: "Could not start reveal" });
   }
 
-  const { data: run, error: runError } = await supabaseAdmin
-    .from("enrichment_runs")
-    .insert({
-      user_id: userId,
-      list_id: list.id,
-      run_type: config.runType,
-      status: "pending",
-      requested_count: peopleToProcess.length,
-    })
-    .select("id")
-    .single();
+  const items: ListItemRef[] = people.map((p, i) => ({ id: listItems[i].id as string, person: p }));
+  const result = await holdCallResolve(req, userId, listId, items, config);
 
-  if (runError || !run) {
-    req.log.error({ err: runError }, "failed to create enrichment_run");
-    return res.status(500).json({ error: "Could not start reveal" });
-  }
-
-  const runId = run.id as string;
-  const creditsNeeded = peopleToProcess.length * config.creditsPerReveal;
-
-  const { error: holdError } = await supabaseAdmin.rpc("fn_hold_credits", {
-    p_user_id: userId,
-    p_run_id: runId,
-    p_amount: creditsNeeded,
-  });
-
-  if (holdError) {
-    await supabaseAdmin
-      .from("enrichment_runs")
-      .update({ status: "failed", completed_at: new Date().toISOString() })
-      .eq("id", runId);
-
-    const insufficient = holdError.message?.includes("insufficient_credits");
-    return res.status(insufficient ? 402 : 500).json({
-      error: insufficient ? "Not enough credits for this reveal" : "Could not reserve credits",
-    });
-  }
-
-  let responseRows: Record<string, unknown>[] = [];
-  let batchFailed = false;
-
-  try {
-    const n8nRes = await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ people: peopleToProcess }),
-    });
-
-    if (n8nRes.ok) {
-      const data: unknown = await n8nRes.json();
-      const rows: unknown[] = Array.isArray(data)
-        ? data
-        : Array.isArray((data as Record<string, unknown>)?.people)
-          ? ((data as Record<string, unknown>).people as unknown[])
-          : Array.isArray((data as Record<string, unknown>)?.data)
-            ? ((data as Record<string, unknown>).data as unknown[])
-            : [];
-      responseRows = rows as Record<string, unknown>[];
-    } else {
-      const bodyText = await n8nRes.text().catch(() => "");
-      req.log.error(
-        { status: n8nRes.status, body: bodyText.slice(0, 300) },
-        `${config.providerName} webhook returned non-2xx`,
-      );
-      batchFailed = true;
-    }
-  } catch (err) {
-    req.log.error({ err }, `${config.providerName} webhook call failed`);
-    batchFailed = true;
-  }
-
-  const results: Person[] = [];
-  // Real responses have shown fields echoed back under lowercase or
-  // uppercase variants of the canonical key — check all three.
-  const fieldCandidates =
-    config.targetField === "Email" ? ["Email", "email", "EMAIL"] : ["Phone", "phone", "PHONE"];
-
-  for (let i = 0; i < peopleToProcess.length; i++) {
-    const person = peopleToProcess[i];
-    const listItemId = listItems[i].id as string;
-    const row = responseRows[i];
-
-    const value = batchFailed ? "" : pickFirstNonEmpty(...fieldCandidates.map((key) => row?.[key]));
-    const outcome: "found" | "not_found" | "error" = batchFailed ? "error" : value ? "found" : "not_found";
-    const updatedPerson: Person = { ...person, [config.targetField]: value };
-
-    await supabaseAdmin.from("enrichment_results").insert({
-      run_id: runId,
-      list_item_id: listItemId,
-      user_id: userId,
-      provider: config.providerName,
-      outcome,
-      cost: 0,
-    });
-
-    await supabaseAdmin
-      .from("list_items")
-      .update({
-        data: updatedPerson,
-        enrichment_status: outcome === "found" ? "enriched" : outcome === "not_found" ? "not_found" : "error",
-      })
-      .eq("id", listItemId);
-
-    const { error: resolveError } = await supabaseAdmin.rpc("fn_resolve_row", {
-      p_run_id: runId,
-      p_list_item_id: listItemId,
-      p_outcome: outcome,
-      p_credits: config.creditsPerReveal,
-    });
-
-    if (resolveError) {
-      req.log.error({ err: resolveError }, "failed to resolve reveal row");
-    }
-
-    results.push(updatedPerson);
-  }
-
-  if (batchFailed) {
+  if (result.batchFailed) {
     return res.status(502).json({ error: `${config.providerName} provider failed, credits released` });
   }
 
-  // Skipped rows were never sent to the webhook or charged — merge them
-  // back in unrevealed, in their original order, so the caller gets a
-  // result for every row it selected, not just the affordable subset.
-  const finalResults = [...results, ...peopleSkipped];
+  if (result.affordableCount === 0) {
+    return res.status(402).json({
+      error: `Not enough credits — need at least ${config.creditsPerReveal} to reveal even one.`,
+      people,
+      skipped_count: items.length,
+    });
+  }
 
-  return res.json({ people: finalResults, list_id: list.id, skipped_count: skippedCount });
+  const resolvedMap = new Map(result.resolved.map((r) => [r.id, r.person]));
+  const finalResults = items.map((item) => resolvedMap.get(item.id) ?? item.person);
+
+  return res.json({ people: finalResults, list_id: listId, skipped_count: result.creditSkippedCount });
+}
+
+// Re-run on rows already saved in a list — skips rows that already have the
+// target field filled in, so you're never re-charged for what's done.
+export async function runListRevealBatch(req: Request, res: Response, config: RevealConfig) {
+  const webhookUrl = process.env[config.webhookEnvVar];
+  if (!webhookUrl) {
+    return res.status(500).json({ error: config.notConfiguredError });
+  }
+
+  const body = (req.body ?? {}) as { list_item_ids?: string[] };
+  const requestedIds = Array.isArray(body.list_item_ids) ? body.list_item_ids.slice(0, MAX_ROWS_PER_REQUEST) : [];
+
+  if (requestedIds.length === 0) {
+    return res.status(400).json({ error: "Select at least one row" });
+  }
+
+  const userId = req.user!.id;
+
+  const { data: rows, error: fetchError } = await supabaseAdmin
+    .from("list_items")
+    .select("id, list_id, data")
+    .in("id", requestedIds)
+    .eq("user_id", userId);
+
+  if (fetchError || !rows || rows.length === 0) {
+    return res.status(404).json({ error: "Could not find the selected rows" });
+  }
+
+  const listId = rows[0].list_id as string;
+
+  let alreadyDoneCount = 0;
+  const candidates: ListItemRef[] = [];
+  for (const row of rows) {
+    const person = row.data as Person;
+    const value = person?.[config.targetField];
+    if (typeof value === "string" && value.trim()) {
+      alreadyDoneCount++;
+    } else {
+      candidates.push({ id: row.id as string, person });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return res.json({
+      updated_count: 0,
+      already_done_count: alreadyDoneCount,
+      skipped_count: 0,
+    });
+  }
+
+  const result = await holdCallResolve(req, userId, listId, candidates, config);
+
+  if (result.batchFailed) {
+    return res.status(502).json({ error: `${config.providerName} provider failed, credits released` });
+  }
+
+  if (result.affordableCount === 0) {
+    return res.status(402).json({
+      error: `Not enough credits — need at least ${config.creditsPerReveal} to reveal even one.`,
+    });
+  }
+
+  return res.json({
+    updated_count: result.resolved.length,
+    already_done_count: alreadyDoneCount,
+    skipped_count: result.creditSkippedCount,
+  });
 }

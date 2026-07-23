@@ -15,11 +15,24 @@ export default function LoginPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     setSubmitting(false);
     if (error) {
       setError(authErrorMessage(error));
       return;
+    }
+
+    // Admins land straight in the admin console, not the product dashboard.
+    // Checked here (once, right after sign-in) rather than as a standing
+    // redirect on DashboardPage itself — a blanket redirect there would also
+    // fire when an admin deliberately navigates back via "Exit to app".
+    const userId = data.user?.id;
+    if (userId) {
+      const { data: profile } = await supabase.from("profiles").select("is_admin").eq("id", userId).maybeSingle();
+      if (profile?.is_admin) {
+        navigate("/admin");
+        return;
+      }
     }
     navigate("/dashboard");
   }

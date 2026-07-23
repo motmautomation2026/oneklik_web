@@ -1,6 +1,7 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./lib/AuthProvider";
 import RequireAuth from "./components/RequireAuth";
+import RootRedirect from "./components/RootRedirect";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
@@ -12,6 +13,14 @@ import LinkedInLookupPage from "./pages/LinkedInLookupPage";
 import ListsPage from "./pages/ListsPage";
 import ListDetailPage from "./pages/ListDetailPage";
 import BuyCreditsPage from "./pages/BuyCreditsPage";
+import RequireAdmin from "./admin/guards/RequireAdmin";
+import AdminShell from "./admin/layout/AdminShell";
+import AdminOverviewPage from "./admin/pages/AdminOverviewPage";
+import AdminUsersPage from "./admin/pages/AdminUsersPage";
+import AdminUserDetailPage from "./admin/pages/AdminUserDetailPage";
+import AdminTransactionsPage from "./admin/pages/AdminTransactionsPage";
+import AdminRunsPage from "./admin/pages/AdminRunsPage";
+import AdminListsPage from "./admin/pages/AdminListsPage";
 
 function App() {
   return (
@@ -85,7 +94,29 @@ function App() {
               </RequireAuth>
             }
           />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route
+            path="/admin"
+            element={
+              // Deliberately no requireOnboarded here (unlike every product
+              // route below) — an admin account promoted via SQL may never
+              // have gone through /onboarding (profile.company left null),
+              // and requireOnboarded would otherwise bounce them to
+              // /onboarding before RequireAdmin even runs.
+              <RequireAuth>
+                <RequireAdmin>
+                  <AdminShell />
+                </RequireAdmin>
+              </RequireAuth>
+            }
+          >
+            <Route index element={<AdminOverviewPage />} />
+            <Route path="users" element={<AdminUsersPage />} />
+            <Route path="users/:id" element={<AdminUserDetailPage />} />
+            <Route path="transactions" element={<AdminTransactionsPage />} />
+            <Route path="runs" element={<AdminRunsPage />} />
+            <Route path="lists" element={<AdminListsPage />} />
+          </Route>
+          <Route path="*" element={<RootRedirect />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

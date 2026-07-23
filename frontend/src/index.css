@@ -399,6 +399,21 @@ label.text-uppercase,
   color: #fff;
 }
 
+/* Admin console entry point — visually separated from product nav (a
+   hairline divider + slightly dimmer at rest) so it reads as "a different
+   surface," not just another feature in the list. */
+.app-sidebar-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.app-sidebar-link-admin {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.app-sidebar-link-admin:hover {
+  color: #fff;
+}
+
 /* Mobile: the sidebar becomes a slide-in overlay drawer instead of a
    permanently visible column — even the icon-only collapsed rail would eat
    too much of a phone's width to stay always-on. */

@@ -23,7 +23,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [sessionLoading, setSessionLoading] = useState(true);
 
   async function loadProfile(userId: string) {
     const { data } = await supabase
@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
-      setLoading(false);
+      setSessionLoading(false);
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
@@ -55,11 +55,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadProfile(session.user.id);
   }, [session?.user?.id]);
 
+  // `profile` lags one async round-trip behind `session` on every sign-in —
+  // a consumer that only checked a `loading` flag tied to the initial
+  // session restore (the old behavior) would see loading=false with a
+  // still-null profile during that gap. RequireAdmin hit exactly this: it
+  // read profile=null before the fetch resolved and bounced to /dashboard.
+  // Deriving readiness from whether `profile` actually matches the current
+  // session's user — rather than a second loading flag — closes the gap
+  // without depending on effect-ordering timing.
+  const profileReady = !session?.user || profile?.id === session.user.id;
+
   const value: AuthContextValue = {
     session,
     user: session?.user ?? null,
-    profile,
-    loading,
+    profile: profileReady ? profile : null,
+    loading: sessionLoading || !profileReady,
     refreshProfile: async () => {
       if (session?.user) await loadProfile(session.user.id);
     },

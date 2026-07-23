@@ -8,9 +8,11 @@ import {
   Linkedin,
   ListUl,
   People,
+  ShieldLock,
   Speedometer2,
   X,
 } from "react-bootstrap-icons";
+import { useAuth } from "../lib/AuthProvider";
 
 interface NavItem {
   to: string;
@@ -37,6 +39,7 @@ interface SidebarProps {
 
 export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const location = useLocation();
+  const { profile } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEY) === "1");
 
   function toggleCollapsed() {
@@ -90,6 +93,15 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
             );
           })}
         </nav>
+
+        {profile?.is_admin && (
+          <div className="app-sidebar-footer mt-auto px-2 pb-3 pt-2">
+            <Link to="/admin" className="app-sidebar-link app-sidebar-link-admin" onClick={onClose}>
+              <ShieldLock size={18} />
+              <span className="app-sidebar-link-label">Admin console</span>
+            </Link>
+          </div>
+        )}
       </aside>
     </>
   );

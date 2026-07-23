@@ -16,6 +16,7 @@ import prospeoSuggestionsRouter from "./routes/prospeoSuggestions.js";
 import mergeListsRouter from "./routes/mergeLists.js";
 import razorpayWebhookRouter from "./routes/razorpayWebhook.js";
 import paymentsCheckoutRouter from "./routes/paymentsCheckout.js";
+import adminRouter from "./admin/routes.js";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const app = express();
@@ -46,6 +47,7 @@ app.use("/api", linkedinLookupRouter);
 app.use("/api", prospeoSuggestionsRouter);
 app.use("/api", mergeListsRouter);
 app.use("/api", paymentsCheckoutRouter);
+app.use("/api/admin", adminRouter);
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {

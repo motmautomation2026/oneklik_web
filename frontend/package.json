@@ -16,7 +16,8 @@
     "react-bootstrap": "^2.10.10",
     "react-bootstrap-icons": "^1.11.6",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.1",
+    "recharts": "^2.15.0"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",

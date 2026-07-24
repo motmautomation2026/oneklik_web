@@ -68,6 +68,11 @@ body {
   font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Popper briefly renders overlays (e.g. the wallet popover) past the
+     viewport edge before flipping into place, which flashes a horizontal
+     scrollbar and shifts the whole page by its width. Body never needs to
+     scroll sideways, so just refuse to. */
+  overflow-x: hidden;
 }
 
 h1,
@@ -475,25 +480,20 @@ label.text-uppercase,
   box-shadow: 0 1px 2px rgba(38, 30, 62, 0.05);
 }
 
-.app-topbar-credits {
+.app-topbar-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  background: var(--brand-50);
-  color: var(--brand-700);
+  gap: 0.5rem;
+  background: #fff;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.82rem;
-  white-space: nowrap;
-}
-
-.app-topbar-credits strong {
-  font-weight: 700;
+  padding: 0.3rem;
+  box-shadow: 0 1px 3px rgba(38, 30, 62, 0.06);
 }
 
 .app-topbar-divider {
   width: 1px;
-  height: 22px;
+  height: 20px;
   background: var(--line);
 }
 
@@ -502,21 +502,25 @@ label.text-uppercase,
   height: 36px;
   border-radius: 50%;
   border: none;
-  background: transparent;
-  color: var(--ink-dim);
+  background: var(--brand-50);
+  color: var(--brand-700);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   transition:
     background 0.15s ease,
-    color 0.15s ease;
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
 }
 
 .app-topbar-icon-btn:hover,
 .app-topbar-icon-btn:focus-visible {
-  background: var(--brand-50);
+  background: var(--brand-100);
   color: var(--brand-700);
+  box-shadow: 0 2px 8px rgba(38, 30, 62, 0.12);
+  transform: translateY(-1px);
 }
 
 .app-user-menu-toggle {
@@ -527,23 +531,30 @@ label.text-uppercase,
   background: transparent;
   padding: 0.25rem 0.55rem 0.25rem 0.25rem;
   border-radius: 999px;
-  transition: background 0.15s ease;
+  transition:
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 
 .app-user-menu-toggle:hover,
 .app-user-menu-toggle:focus-visible {
   background: var(--brand-50);
+  transform: translateY(-1px);
 }
 
 .app-user-menu-toggle::after {
   display: none;
 }
 
+.app-wallet-popover {
+  min-width: 220px;
+}
+
 .app-avatar {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--brand-100);
+  background: linear-gradient(135deg, var(--brand-100), var(--brand-300));
   color: var(--brand-700);
   font-weight: 700;
   font-size: 0.76rem;
@@ -551,6 +562,7 @@ label.text-uppercase,
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6);
   flex-shrink: 0;
 }
 

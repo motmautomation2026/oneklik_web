@@ -10,24 +10,36 @@ interface AdminResourceState<T> {
 // loading/error state so one failing endpoint doesn't blank the rest of the
 // page — this is the one hook shared across them instead of repeating the
 // same fetch/loading/error boilerplate six times.
-export function useAdminResource<T>(fetcher: () => Promise<T>, deps: unknown[] = []): AdminResourceState<T> {
+//
+// The fetcher may take an AbortSignal to cancel its underlying request when
+// deps change again before it resolves (e.g. fast typing in a debounced
+// search box) — existing zero-arg fetchers (`() => fetchX()`) still work
+// unchanged since they simply ignore the extra argument.
+export function useAdminResource<T>(
+  fetcher: (signal: AbortSignal) => Promise<T>,
+  deps: unknown[] = [],
+): AdminResourceState<T> {
   const [state, setState] = useState<AdminResourceState<T>>({ data: null, loading: true, error: null });
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setState((prev) => ({ ...prev, loading: true, error: null }));
     fetcherRef
-      .current()
+      .current(controller.signal)
       .then((data) => {
         if (active) setState({ data, loading: false, error: null });
       })
       .catch((err: unknown) => {
-        if (active) setState({ data: null, loading: false, error: err instanceof Error ? err.message : "Failed to load" });
+        if (active && !(err instanceof DOMException && err.name === "AbortError")) {
+          setState({ data: null, loading: false, error: err instanceof Error ? err.message : "Failed to load" });
+        }
       });
     return () => {
       active = false;
+      controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);

@@ -65,12 +65,13 @@ export interface FetchUsersParams {
   page: number;
   pageSize: number;
   search?: string;
+  signal?: AbortSignal;
 }
 
-export function fetchUsers({ page, pageSize, search }: FetchUsersParams): Promise<PaginatedUsers> {
+export function fetchUsers({ page, pageSize, search, signal }: FetchUsersParams): Promise<PaginatedUsers> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) params.set("search", search);
-  return apiGet<PaginatedUsers>(`/api/admin/users?${params.toString()}`);
+  return apiGet<PaginatedUsers>(`/api/admin/users?${params.toString()}`, signal);
 }
 
 export function fetchUserDetail(userId: string): Promise<UserDetail> {
@@ -148,12 +149,15 @@ export interface FetchListsParams {
   page: number;
   pageSize: number;
   search?: string;
+  userId?: string;
+  signal?: AbortSignal;
 }
 
-export function fetchLists({ page, pageSize, search }: FetchListsParams): Promise<PaginatedLists> {
+export function fetchLists({ page, pageSize, search, userId, signal }: FetchListsParams): Promise<PaginatedLists> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) params.set("search", search);
-  return apiGet<PaginatedLists>(`/api/admin/lists?${params.toString()}`);
+  if (userId) params.set("userId", userId);
+  return apiGet<PaginatedLists>(`/api/admin/lists?${params.toString()}`, signal);
 }
 
 export function fetchTopCompanies(limit = 10): Promise<{ companies: CompanyRollupEntry[] }> {

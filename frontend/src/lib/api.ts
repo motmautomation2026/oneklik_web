@@ -70,12 +70,13 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   URL.revokeObjectURL(url);
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "GET",
     headers: {
       Authorization: await authHeader(),
     },
+    signal,
   });
 
   const json = await res.json().catch(() => ({}));

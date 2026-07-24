@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Badge, Dropdown, Spinner } from "react-bootstrap";
+import { Badge, Dropdown, OverlayTrigger, Popover, ProgressBar, Spinner } from "react-bootstrap";
 import { ChevronDown, List, Wallet2 } from "react-bootstrap-icons";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
@@ -15,6 +15,8 @@ function initialsFromEmail(email: string | null | undefined): string {
 interface Wallet {
   available_balance: number;
   held_balance: number;
+  lifetime_purchased: number;
+  lifetime_consumed: number;
 }
 
 const LOW_BALANCE_THRESHOLD = 10;
@@ -24,13 +26,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!user) return;
     let active = true;
     supabase
       .from("credit_wallets")
-      .select("available_balance, held_balance")
+      .select("available_balance, held_balance, lifetime_purchased, lifetime_consumed")
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -46,7 +50,58 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     navigate("/login");
   }
 
+  // Hover-to-open: opens instantly, but closes on a short delay so moving
+  // the cursor across the small gap between the toggle and the menu (or a
+  // brief flick outside) doesn't snap it shut. Click/keyboard/Escape/outside
+  // click still work as normal — onToggle mirrors Bootstrap's own decision
+  // for those, this only adds the two hover-driven paths on top.
+  function openUserMenu() {
+    if (userMenuCloseTimer.current) {
+      clearTimeout(userMenuCloseTimer.current);
+      userMenuCloseTimer.current = null;
+    }
+    setUserMenuOpen(true);
+  }
+
+  function scheduleCloseUserMenu() {
+    userMenuCloseTimer.current = setTimeout(() => setUserMenuOpen(false), 200);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (userMenuCloseTimer.current) clearTimeout(userMenuCloseTimer.current);
+    };
+  }, []);
+
   const lowBalance = wallet !== null && wallet.available_balance < LOW_BALANCE_THRESHOLD;
+
+  const totalEverGranted = wallet
+    ? wallet.available_balance + wallet.held_balance + wallet.lifetime_consumed
+    : 0;
+  const consumedPct = wallet && totalEverGranted > 0 ? Math.round((wallet.lifetime_consumed / totalEverGranted) * 100) : 0;
+
+  const walletPopover = (
+    <Popover id="wallet-popover" className="app-wallet-popover">
+      <Popover.Body>
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <span className="text-body-secondary small">Available credits</span>
+          {wallet ? <strong className="h5 mb-0">{wallet.available_balance}</strong> : <Spinner animation="border" size="sm" />}
+        </div>
+        {wallet && (
+          <>
+            <ProgressBar now={consumedPct} className="mb-1" style={{ height: 6 }} />
+            <div className="d-flex justify-content-between small text-body-secondary">
+              <span>{wallet.lifetime_consumed} used</span>
+              <span>{totalEverGranted} total</span>
+            </div>
+          </>
+        )}
+        <button type="button" className="btn btn-primary btn-sm w-100 mt-2" onClick={() => navigate("/wallet")}>
+          View wallet
+        </button>
+      </Popover.Body>
+    </Popover>
+  );
 
   return (
     <div className="d-flex min-vh-100 bg-white">
@@ -67,35 +122,41 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 Low balance
               </Badge>
             )}
-            <div className="app-topbar-credits">
-              <span>Available Credits</span>
-              {wallet ? <strong>{wallet.available_balance}</strong> : <Spinner animation="border" size="sm" />}
+            <div className="app-topbar-toolbar">
+              <OverlayTrigger trigger={["hover", "focus"]} placement="bottom-end" overlay={walletPopover}>
+                <button
+                  type="button"
+                  className="app-topbar-icon-btn"
+                  onClick={() => navigate("/wallet")}
+                  aria-label="Wallet"
+                  title="Wallet"
+                >
+                  <Wallet2 size={18} />
+                </button>
+              </OverlayTrigger>
+
+              <span className="app-topbar-divider" />
+
+              <Dropdown
+                align="end"
+                show={userMenuOpen}
+                onToggle={(nextShow) => setUserMenuOpen(nextShow)}
+                onMouseEnter={openUserMenu}
+                onMouseLeave={scheduleCloseUserMenu}
+              >
+                <Dropdown.Toggle as="button" className="app-user-menu-toggle" id="user-menu-toggle">
+                  <span className="app-avatar">{initialsFromEmail(user?.email)}</span>
+                  <ChevronDown size={12} className="text-body-secondary" />
+                </Dropdown.Toggle>
+                <Dropdown.Menu>
+                  <Dropdown.Item onClick={() => navigate("/profile")}>Profile</Dropdown.Item>
+                  <Dropdown.Item onClick={() => navigate("/wallet")}>Wallet</Dropdown.Item>
+                  <Dropdown.Item onClick={() => navigate("/payments")}>Payments</Dropdown.Item>
+                  <Dropdown.Divider />
+                  <Dropdown.Item onClick={handleSignOut}>Sign out</Dropdown.Item>
+                </Dropdown.Menu>
+              </Dropdown>
             </div>
-
-            <span className="app-topbar-divider" />
-
-            <button
-              type="button"
-              className="app-topbar-icon-btn"
-              onClick={() => navigate("/wallet")}
-              aria-label="Wallet"
-              title="Wallet"
-            >
-              <Wallet2 size={18} />
-            </button>
-
-            <Dropdown align="end">
-              <Dropdown.Toggle as="button" className="app-user-menu-toggle" id="user-menu-toggle">
-                <span className="app-avatar">{initialsFromEmail(user?.email)}</span>
-                <ChevronDown size={12} className="text-body-secondary" />
-              </Dropdown.Toggle>
-              <Dropdown.Menu>
-                <Dropdown.Item onClick={() => navigate("/profile")}>Profile</Dropdown.Item>
-                <Dropdown.Item onClick={() => navigate("/wallet")}>Wallet</Dropdown.Item>
-                <Dropdown.Divider />
-                <Dropdown.Item onClick={handleSignOut}>Sign out</Dropdown.Item>
-              </Dropdown.Menu>
-            </Dropdown>
           </div>
         </div>
         <div className="flex-grow-1 bg-light">{children}</div>

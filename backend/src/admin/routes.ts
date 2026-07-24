@@ -254,8 +254,9 @@ router.get("/lists", async (req: Request, res: Response) => {
   const page = clampInt(req.query.page, 1, 1, 100_000);
   const pageSize = clampInt(req.query.pageSize, 25, 1, 100);
   const search = stringParam(req.query.search);
+  const userId = stringParam(req.query.userId);
   try {
-    const result = await getLists({ page, pageSize, search });
+    const result = await getLists({ page, pageSize, search, userId });
     return res.json(result);
   } catch (err) {
     req.log.error({ err }, "admin: failed to load lists");

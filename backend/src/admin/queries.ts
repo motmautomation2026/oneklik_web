@@ -915,13 +915,18 @@ interface GetListsParams {
   page: number;
   pageSize: number;
   search?: string;
+  userId?: string;
 }
 
 // search branches like transactions: "@" implies an owner-email search
 // (bounded id-set resolution), otherwise a DB-level ilike on the list name.
 // list_items(count) is Postgrest's embedded-aggregate syntax — one row's
 // item count comes back in the same query instead of N extra head-counts.
-export async function getLists({ page, pageSize, search }: GetListsParams): Promise<PaginatedLists> {
+// When userId is set (drilling into one user's lists from their detail
+// page), it's applied directly and the email-search branch is skipped
+// entirely — there's no need to resolve owner ids when the owner is
+// already known.
+export async function getLists({ page, pageSize, search, userId }: GetListsParams): Promise<PaginatedLists> {
   const from = (page - 1) * pageSize;
   const trimmedSearch = search?.trim();
 
@@ -931,7 +936,10 @@ export async function getLists({ page, pageSize, search }: GetListsParams): Prom
     .order("created_at", { ascending: false })
     .range(from, from + pageSize - 1);
 
-  if (trimmedSearch?.includes("@")) {
+  if (userId) {
+    query = query.eq("user_id", userId);
+    if (trimmedSearch) query = query.ilike("name", `%${trimmedSearch}%`);
+  } else if (trimmedSearch?.includes("@")) {
     const ids = await findUserIdsByEmailSubstring(trimmedSearch);
     query = ids.size > 0 ? query.in("user_id", Array.from(ids)) : query.eq("user_id", NO_MATCH_USER_ID);
   } else if (trimmedSearch) {

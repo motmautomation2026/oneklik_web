@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Badge, Form } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Badge, Button, Form } from "react-bootstrap";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchLists, fetchListsActivity } from "../api/adminApi";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
@@ -18,18 +18,43 @@ const PAGE_SIZE = 25;
 // "Lists activity" card — this is the row-level browser, useful when
 // following up on a specific user's "my enrichment didn't work" report.
 export default function AdminListsPage() {
-  const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const userId = searchParams.get("userId") ?? undefined;
+  const [page, setPage] = useState(() => Number(searchParams.get("page")) || 1);
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
   const search = useDebouncedValue(searchInput);
 
+  // Mirror page/search into the URL (userId is left untouched here — it's
+  // only ever set/cleared via navigation, see handleClearUserFilter below)
+  // so the view is bookmarkable and survives browser back/forward.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (page > 1) next.set("page", String(page));
+    else next.delete("page");
+    if (search) next.set("search", search);
+    else next.delete("search");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, search]);
+
   const activity = useAdminResource(fetchListsActivity, []);
-  const lists = useAdminResource(() => fetchLists({ page, pageSize: PAGE_SIZE, search: search || undefined }), [
-    page,
-    search,
-  ]);
+  const lists = useAdminResource(
+    (signal) => fetchLists({ page, pageSize: PAGE_SIZE, search: search || undefined, userId, signal }),
+    [page, search, userId],
+  );
+
+  const ownerEmail = userId ? lists.data?.rows.find((r) => r.owner_user_id === userId)?.owner_email : undefined;
 
   function handleSearchChange(value: string) {
     setSearchInput(value);
+    setPage(1);
+  }
+
+  function handleClearUserFilter() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("userId");
+    next.delete("page");
+    setSearchParams(next, { replace: true });
     setPage(1);
   }
 
@@ -56,13 +81,31 @@ export default function AdminListsPage() {
 
   return (
     <>
-      <div className="mb-4">
-        <h1 className="h4 mb-1" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-          Lists
-        </h1>
-        <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-          Every list across all users, with row counts.
-        </p>
+      <div className="mb-4 d-flex align-items-start justify-content-between gap-3 flex-wrap">
+        <div>
+          <h1 className="h4 mb-1" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+            Lists
+          </h1>
+          <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+            {userId
+              ? `Lists owned by ${ownerEmail ?? userId}.`
+              : "Every list across all users, with row counts."}
+          </p>
+        </div>
+        {userId && (
+          <Badge bg="info" className="d-flex align-items-center gap-2 py-2 px-3">
+            Filtered to {ownerEmail ?? userId}
+            <Button
+              size="sm"
+              variant="link"
+              className="p-0 text-white text-decoration-none"
+              onClick={handleClearUserFilter}
+              aria-label="Clear user filter"
+            >
+              &times;
+            </Button>
+          </Badge>
+        )}
       </div>
 
       <div className="row g-3 mb-4">
@@ -89,14 +132,14 @@ export default function AdminListsPage() {
       )}
 
       <SectionCard
-        title="All lists"
+        title={userId ? "This user's lists" : "All lists"}
         loading={lists.loading}
         error={lists.error}
         action={
           <Form.Control
             type="search"
             size="sm"
-            placeholder="Search by name or owner email…"
+            placeholder={userId ? "Search by name…" : "Search by name or owner email…"}
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
             style={{ maxWidth: 260 }}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Form, Modal, Spinner } from "react-bootstrap";
 import AppLayout from "../components/AppLayout";
+import PaginationBar from "../components/PaginationBar";
 import { supabase } from "../lib/supabaseClient";
 import { apiPost } from "../lib/api";
 import { useAuth } from "../lib/AuthProvider";
@@ -14,10 +15,14 @@ interface ListRow {
   list_items: { count: number }[];
 }
 
+const PAGE_SIZE = 20;
+
 export default function ListsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [lists, setLists] = useState<ListRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +33,10 @@ export default function ListsPage() {
   const [deleting, setDeleting] = useState<ListRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Maps id -> kind (not just a Set<id>) so merge validation stays correct
+  // even when the selection spans multiple pages and the other page's rows
+  // aren't in `lists` right now.
+  const [selected, setSelected] = useState<Map<string, ListRow["kind"]>>(new Map());
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [mergeName, setMergeName] = useState("");
   const [merging, setMerging] = useState(false);
@@ -38,15 +46,22 @@ export default function ListsPage() {
     if (!user) return;
     setLoading(true);
     setError(null);
-    const { data, error: fetchError } = await supabase
+    const from = (page - 1) * PAGE_SIZE;
+    const { data, count, error: fetchError } = await supabase
       .from("lists")
-      .select("id, name, kind, created_at, list_items(count)")
+      .select("id, name, kind, created_at, list_items(count)", { count: "exact" })
       .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
     if (fetchError) {
       setError(fetchError.message);
     } else {
       setLists((data as ListRow[]) ?? []);
+      setTotal(count ?? 0);
+      // If a delete emptied the last page, step back rather than showing a blank page.
+      if ((data?.length ?? 0) === 0 && page > 1) {
+        setPage(page - 1);
+      }
     }
     setLoading(false);
   }
@@ -54,7 +69,7 @@ export default function ListsPage() {
   useEffect(() => {
     loadLists();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, page]);
 
   function openRename(list: ListRow) {
     setRenaming(list);
@@ -90,17 +105,16 @@ export default function ListsPage() {
     }
   }
 
-  function toggleSelected(id: string) {
+  function toggleSelected(list: ListRow) {
     setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      const next = new Map(prev);
+      if (next.has(list.id)) next.delete(list.id);
+      else next.set(list.id, list.kind);
       return next;
     });
   }
 
-  const selectedLists = lists.filter((l) => selected.has(l.id));
-  const selectedKinds = new Set(selectedLists.map((l) => l.kind));
+  const selectedKinds = new Set(selected.values());
   const canMerge = selected.size >= 2 && selectedKinds.size === 1;
 
   function openMergeModal() {
@@ -114,11 +128,11 @@ export default function ListsPage() {
     setMergeError(null);
     try {
       const result = await apiPost<{ list_id: string }>("/api/lists/merge", {
-        list_ids: Array.from(selected),
+        list_ids: Array.from(selected.keys()),
         name: mergeName.trim(),
       });
       setShowMergeModal(false);
-      setSelected(new Set());
+      setSelected(new Map());
       navigate(`/lists/${result.list_id}`);
     } catch (err) {
       setMergeError(err instanceof Error ? err.message : "Could not merge lists");
@@ -182,7 +196,7 @@ export default function ListsPage() {
                             type="checkbox"
                             className="form-check-input"
                             checked={selected.has(list.id)}
-                            onChange={() => toggleSelected(list.id)}
+                            onChange={() => toggleSelected(list)}
                             aria-label={`Select ${list.name}`}
                           />
                         </td>
@@ -209,6 +223,10 @@ export default function ListsPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+
+            {!loading && lists.length > 0 && (
+              <PaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPageChange={setPage} />
             )}
           </Card.Body>
         </Card>

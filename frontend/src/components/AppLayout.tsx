@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Badge, Dropdown, OverlayTrigger, Popover, ProgressBar, Spinner } from "react-bootstrap";
+import { Badge, Dropdown, Popover, ProgressBar, Spinner } from "react-bootstrap";
 import { ChevronDown, List, Wallet2 } from "react-bootstrap-icons";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
@@ -27,7 +27,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
   const userMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const walletCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -67,9 +69,25 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     userMenuCloseTimer.current = setTimeout(() => setUserMenuOpen(false), 200);
   }
 
+  // Same idea for the wallet popover: stays open while the cursor is over
+  // the icon or the card itself, and only closes once it has left both
+  // (the short delay just covers the gap while crossing from one to the other).
+  function openWallet() {
+    if (walletCloseTimer.current) {
+      clearTimeout(walletCloseTimer.current);
+      walletCloseTimer.current = null;
+    }
+    setWalletOpen(true);
+  }
+
+  function scheduleCloseWallet() {
+    walletCloseTimer.current = setTimeout(() => setWalletOpen(false), 150);
+  }
+
   useEffect(() => {
     return () => {
       if (userMenuCloseTimer.current) clearTimeout(userMenuCloseTimer.current);
+      if (walletCloseTimer.current) clearTimeout(walletCloseTimer.current);
     };
   }, []);
 
@@ -81,7 +99,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const consumedPct = wallet && totalEverGranted > 0 ? Math.round((wallet.lifetime_consumed / totalEverGranted) * 100) : 0;
 
   const walletPopover = (
-    <Popover id="wallet-popover" className="app-wallet-popover">
+    <Popover
+      id="wallet-popover"
+      className="app-wallet-popover"
+      onMouseEnter={openWallet}
+      onMouseLeave={scheduleCloseWallet}
+    >
       <Popover.Body>
         <div className="d-flex justify-content-between align-items-center mb-2">
           <span className="text-body-secondary small">Available credits</span>
@@ -123,17 +146,22 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               </Badge>
             )}
             <div className="app-topbar-toolbar">
-              <OverlayTrigger trigger={["hover", "focus"]} placement="bottom-end" overlay={walletPopover}>
+              <div className="app-wallet-anchor">
                 <button
                   type="button"
                   className="app-topbar-icon-btn"
                   onClick={() => navigate("/wallet")}
+                  onMouseEnter={openWallet}
+                  onMouseLeave={scheduleCloseWallet}
+                  onFocus={openWallet}
+                  onBlur={scheduleCloseWallet}
                   aria-label="Wallet"
                   title="Wallet"
                 >
                   <Wallet2 size={18} />
                 </button>
-              </OverlayTrigger>
+                {walletOpen && walletPopover}
+              </div>
 
               <span className="app-topbar-divider" />
 
@@ -150,7 +178,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 </Dropdown.Toggle>
                 <Dropdown.Menu>
                   <Dropdown.Item onClick={() => navigate("/profile")}>Profile</Dropdown.Item>
-                  <Dropdown.Item onClick={() => navigate("/wallet")}>Wallet</Dropdown.Item>
                   <Dropdown.Item onClick={() => navigate("/payments")}>Payments</Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item onClick={handleSignOut}>Sign out</Dropdown.Item>

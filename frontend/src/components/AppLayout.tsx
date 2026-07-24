@@ -1,10 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Badge, Spinner } from "react-bootstrap";
-import { List } from "react-bootstrap-icons";
+import { Badge, Dropdown, Spinner } from "react-bootstrap";
+import { ChevronDown, List, Wallet2 } from "react-bootstrap-icons";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
 import Sidebar from "./Sidebar";
+
+function initialsFromEmail(email: string | null | undefined): string {
+  if (!email) return "?";
+  const local = email.split("@")[0];
+  return local.slice(0, 2).toUpperCase();
+}
 
 interface Wallet {
   available_balance: number;
@@ -55,19 +61,41 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           >
             <List size={18} />
           </button>
-          <div className="d-flex align-items-center gap-3 ms-auto">
+          <div className="d-flex align-items-center gap-2 ms-auto">
             {lowBalance && (
               <Badge bg="warning" text="dark">
                 Low balance
               </Badge>
             )}
-            <span className="small">
-              Credits:{" "}
+            <div className="app-topbar-credits">
+              <span>Available Credits</span>
               {wallet ? <strong>{wallet.available_balance}</strong> : <Spinner animation="border" size="sm" />}
-            </span>
-            <button className="btn btn-outline-primary btn-sm" onClick={handleSignOut}>
-              Sign out
+            </div>
+
+            <span className="app-topbar-divider" />
+
+            <button
+              type="button"
+              className="app-topbar-icon-btn"
+              onClick={() => navigate("/wallet")}
+              aria-label="Wallet"
+              title="Wallet"
+            >
+              <Wallet2 size={18} />
             </button>
+
+            <Dropdown align="end">
+              <Dropdown.Toggle as="button" className="app-user-menu-toggle" id="user-menu-toggle">
+                <span className="app-avatar">{initialsFromEmail(user?.email)}</span>
+                <ChevronDown size={12} className="text-body-secondary" />
+              </Dropdown.Toggle>
+              <Dropdown.Menu>
+                <Dropdown.Item onClick={() => navigate("/profile")}>Profile</Dropdown.Item>
+                <Dropdown.Item onClick={() => navigate("/wallet")}>Wallet</Dropdown.Item>
+                <Dropdown.Divider />
+                <Dropdown.Item onClick={handleSignOut}>Sign out</Dropdown.Item>
+              </Dropdown.Menu>
+            </Dropdown>
           </div>
         </div>
         <div className="flex-grow-1 bg-light">{children}</div>

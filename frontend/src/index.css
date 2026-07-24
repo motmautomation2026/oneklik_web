@@ -463,6 +463,97 @@ label.text-uppercase,
   }
 }
 
+/* ── Topbar: credits chip, icon buttons, user menu ───────────────────
+   Deliberately not built from Bootstrap utility combos (bg-primary +
+   bg-opacity-*) — .bg-primary is hard-pinned to --brand-600 with
+   !important above, so opacity utilities can't lighten it. These are
+   real classes on the brand token scale instead. ────────────────────── */
+
+.app-topbar {
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+  box-shadow: 0 1px 2px rgba(38, 30, 62, 0.05);
+}
+
+.app-topbar-credits {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--brand-50);
+  color: var(--brand-700);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.app-topbar-credits strong {
+  font-weight: 700;
+}
+
+.app-topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+
+.app-topbar-icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--ink-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.app-topbar-icon-btn:hover,
+.app-topbar-icon-btn:focus-visible {
+  background: var(--brand-50);
+  color: var(--brand-700);
+}
+
+.app-user-menu-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  background: transparent;
+  padding: 0.25rem 0.55rem 0.25rem 0.25rem;
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.app-user-menu-toggle:hover,
+.app-user-menu-toggle:focus-visible {
+  background: var(--brand-50);
+}
+
+.app-user-menu-toggle::after {
+  display: none;
+}
+
+.app-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--brand-100);
+  color: var(--brand-700);
+  font-weight: 700;
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 /* ── Cards & tables: a touch more definition than bare Bootstrap ────── */
 
 .card {

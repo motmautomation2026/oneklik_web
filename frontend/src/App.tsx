@@ -13,6 +13,8 @@ import LinkedInLookupPage from "./pages/LinkedInLookupPage";
 import ListsPage from "./pages/ListsPage";
 import ListDetailPage from "./pages/ListDetailPage";
 import BuyCreditsPage from "./pages/BuyCreditsPage";
+import ProfilePage from "./pages/ProfilePage";
+import WalletPage from "./pages/WalletPage";
 import RequireAdmin from "./admin/guards/RequireAdmin";
 import AdminShell from "./admin/layout/AdminShell";
 import AdminOverviewPage from "./admin/pages/AdminOverviewPage";
@@ -91,6 +93,22 @@ function App() {
             element={
               <RequireAuth requireOnboarded>
                 <BuyCreditsPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <RequireAuth requireOnboarded>
+                <ProfilePage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/wallet"
+            element={
+              <RequireAuth requireOnboarded>
+                <WalletPage />
               </RequireAuth>
             }
           />

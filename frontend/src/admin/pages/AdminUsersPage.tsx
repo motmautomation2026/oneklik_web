@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge, Button, Form } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { exportUsersCsv, fetchTopCompanies, fetchUsers, fetchUsersKpis } from "../api/adminApi";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
@@ -15,17 +15,31 @@ import type { AdminUserRow, CompanyRollupEntry } from "../types";
 const PAGE_SIZE = 25;
 
 export default function AdminUsersPage() {
-  const [page, setPage] = useState(1);
-  const [searchInput, setSearchInput] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [page, setPage] = useState(() => Number(searchParams.get("page")) || 1);
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
   const search = useDebouncedValue(searchInput);
   const [exporting, setExporting] = useState(false);
 
+  // Mirror page/search into the URL so the view is bookmarkable and survives
+  // browser back/forward — read once as initial state above, kept in sync
+  // here on every change.
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (page > 1) next.set("page", String(page));
+    else next.delete("page");
+    if (search) next.set("search", search);
+    else next.delete("search");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, search]);
+
   const kpis = useAdminResource(fetchUsersKpis, []);
   const topCompanies = useAdminResource(() => fetchTopCompanies(10), []);
-  const users = useAdminResource(() => fetchUsers({ page, pageSize: PAGE_SIZE, search: search || undefined }), [
-    page,
-    search,
-  ]);
+  const users = useAdminResource(
+    (signal) => fetchUsers({ page, pageSize: PAGE_SIZE, search: search || undefined, signal }),
+    [page, search],
+  );
 
   function handleSearchChange(value: string) {
     setSearchInput(value);

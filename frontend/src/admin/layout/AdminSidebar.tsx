@@ -4,7 +4,6 @@ import {
   Activity,
   ChevronDoubleLeft,
   ChevronDoubleRight,
-  ListUl,
   PeopleFill,
   Receipt,
   Speedometer2,
@@ -22,15 +21,16 @@ interface AdminNavItem {
 // (components/Sidebar.tsx). The admin console is a different surface with a
 // different audience; it must never inherit product nav items (Company
 // Search, Lists, Buy Credits, ...). The original three items keep their
-// position — Runs/Lists are appended, not interleaved. (Flagged accounts
-// was removed as a dedicated section per explicit request; per-user flag
-// review still lives on AdminUserDetailPage.)
+// position — Runs is appended, not interleaved. (Flagged accounts was
+// removed as a dedicated section per explicit request; per-user flag review
+// still lives on AdminUserDetailPage.) Lists has no nav entry on purpose —
+// it's only reachable via a user's detail page ("View all lists →"), the
+// route at /admin/lists still exists and works, it's just not in the sidebar.
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: "/admin", label: "Dashboard", icon: Speedometer2, end: true },
   { to: "/admin/users", label: "Users", icon: PeopleFill },
   { to: "/admin/transactions", label: "Transactions", icon: Receipt },
   { to: "/admin/runs", label: "Runs", icon: Activity },
-  { to: "/admin/lists", label: "Lists", icon: ListUl },
 ];
 
 const STORAGE_KEY = "one-klik-admin-sidebar-collapsed";

@@ -165,7 +165,16 @@ export default function AdminUserDetailPage() {
 
       <div className="row g-3 mb-4">
         <div className="col-12 col-xl-6">
-          <SectionCard title={`Lists (${lists_total})`} loading={false} error={null}>
+          <SectionCard
+            title={`Lists (${lists_total})`}
+            loading={false}
+            error={null}
+            action={
+              <Link to={`/admin/lists?userId=${encodeURIComponent(userId)}`} className="small">
+                View all lists &rarr;
+              </Link>
+            }
+          >
             <DataTable
               columns={[
                 { key: "name", header: "Name", render: (row: (typeof lists)[number]) => row.name },

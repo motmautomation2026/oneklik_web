@@ -82,9 +82,15 @@ router.post("/hv/people-search-ai", requireAuth, async (req: Request, res: Respo
     });
 
     if (!n8nRes.ok) {
+      const bodyText = await n8nRes.text().catch(() => "");
+      req.log.error({ status: n8nRes.status, body: bodyText }, "people-search-ai webhook returned non-2xx");
       n8nFailed = true;
     } else {
-      const data: unknown = await n8nRes.json();
+      const bodyText = await n8nRes.text();
+      // n8n sends a bare 200 with an empty body when a workflow branch
+      // never reaches its Respond-to-Webhook node (e.g. "no matches
+      // found") — that's a valid zero-results answer, not a failure.
+      const data: unknown = bodyText.trim() ? JSON.parse(bodyText) : [];
       people = extractPersonRows(data)
         .map((row) => normalizePerson(row as Record<string, unknown>))
         .filter((p) => p["FULL NAME"].length > 0)

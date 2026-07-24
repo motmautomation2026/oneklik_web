@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge, Dropdown, OverlayTrigger, Popover, ProgressBar, Spinner } from "react-bootstrap";
 import { ChevronDown, List, Wallet2 } from "react-bootstrap-icons";
@@ -26,6 +26,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -47,6 +49,29 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     navigate("/login");
   }
+
+  // Hover-to-open: opens instantly, but closes on a short delay so moving
+  // the cursor across the small gap between the toggle and the menu (or a
+  // brief flick outside) doesn't snap it shut. Click/keyboard/Escape/outside
+  // click still work as normal — onToggle mirrors Bootstrap's own decision
+  // for those, this only adds the two hover-driven paths on top.
+  function openUserMenu() {
+    if (userMenuCloseTimer.current) {
+      clearTimeout(userMenuCloseTimer.current);
+      userMenuCloseTimer.current = null;
+    }
+    setUserMenuOpen(true);
+  }
+
+  function scheduleCloseUserMenu() {
+    userMenuCloseTimer.current = setTimeout(() => setUserMenuOpen(false), 200);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (userMenuCloseTimer.current) clearTimeout(userMenuCloseTimer.current);
+    };
+  }, []);
 
   const lowBalance = wallet !== null && wallet.available_balance < LOW_BALANCE_THRESHOLD;
 
@@ -112,7 +137,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
               <span className="app-topbar-divider" />
 
-              <Dropdown align="end">
+              <Dropdown
+                align="end"
+                show={userMenuOpen}
+                onToggle={(nextShow) => setUserMenuOpen(nextShow)}
+                onMouseEnter={openUserMenu}
+                onMouseLeave={scheduleCloseUserMenu}
+              >
                 <Dropdown.Toggle as="button" className="app-user-menu-toggle" id="user-menu-toggle">
                   <span className="app-avatar">{initialsFromEmail(user?.email)}</span>
                   <ChevronDown size={12} className="text-body-secondary" />

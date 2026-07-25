@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { Badge, Dropdown, Popover, ProgressBar, Spinner } from "react-bootstrap";
+import { Alert, Badge, Dropdown, Popover, ProgressBar, Spinner } from "react-bootstrap";
 import { ChevronDown, List, Wallet2 } from "react-bootstrap-icons";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
@@ -22,7 +22,7 @@ interface Wallet {
 const LOW_BALANCE_THRESHOLD = 10;
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const navigate = useNavigate();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -186,6 +186,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </div>
+        {profile?.account_status === "frozen" && (
+          <Alert variant="warning" className="mb-0 rounded-0 border-0 border-bottom py-2 px-3 small">
+            <span className="fw-semibold">Your account is frozen.</span> You can view your existing data, but spending
+            credits — searches, reveals, and purchases — is paused.
+            {profile.status_reason ? ` Reason: ${profile.status_reason}.` : ""} Contact support if you think this is a
+            mistake.
+          </Alert>
+        )}
         <div className="flex-grow-1 bg-light">{children}</div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizeCompany, extractRows, type Company } from "../lib/companyNormalize.js";
 
@@ -15,7 +16,7 @@ interface CompanySearchBody {
   company_count?: number;
 }
 
-router.post("/hv/company-search", requireAuth, async (req: Request, res: Response) => {
+router.post("/hv/company-search", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const webhookUrl = process.env["get-companies_webhook"];
   if (!webhookUrl) {
     return res.status(500).json({ error: "get-companies_webhook not configured" });

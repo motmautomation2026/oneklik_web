@@ -1,8 +1,11 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import type {
+  AccountStatus,
   AdminAccountRow,
   AdminOverview,
   AdminUserRow,
+  ModerationAction,
+  ModerationActionRow,
   CompanyRollupEntry,
   FeatureUsageEntry,
   FlaggedAccountRow,
@@ -377,6 +380,8 @@ interface ProfileWithWallet {
   id: string;
   company: string | null;
   created_at: string;
+  account_status: AccountStatus;
+  suspended_until: string | null;
   credit_wallets: {
     available_balance: number;
     held_balance: number;
@@ -386,7 +391,7 @@ interface ProfileWithWallet {
 }
 
 const PROFILE_WITH_WALLET_SELECT =
-  "id, company, created_at, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
+  "id, company, created_at, account_status, suspended_until, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
 
 // Shared by getUsers and getAllUsersForExport (the export path scans every
 // matching page instead of one) so both build the exact same row shape.
@@ -402,6 +407,8 @@ function toAdminUserRow(row: ProfileWithWallet & { email: string | null }, flagg
     lifetime_purchased: row.credit_wallets?.lifetime_purchased ?? 0,
     lifetime_consumed: row.credit_wallets?.lifetime_consumed ?? 0,
     is_flagged: flaggedSet.has(row.id),
+    account_status: row.account_status ?? "active",
+    suspended_until: row.suspended_until ?? null,
   };
 }
 
@@ -417,6 +424,7 @@ interface GetUsersParams {
   page: number;
   pageSize: number;
   search?: string;
+  status?: AccountStatus;
 }
 
 // No search: a plain DB-level paginated scan (cheap, index-friendly on
@@ -425,8 +433,10 @@ interface GetUsersParams {
 // bounded id set via findUserIdsByEmailSubstring, unions it with the
 // DB-level company match, and paginates that bounded set in JS — the same
 // pattern this file already uses everywhere data isn't reachable via a
-// single indexed Postgres query without a schema change.
-export async function getUsers({ page, pageSize, search }: GetUsersParams): Promise<PaginatedUsers> {
+// single indexed Postgres query without a schema change. An optional
+// account_status filter is applied at the DB level in either branch, and the
+// total is derived from the filtered count so pagination stays accurate.
+export async function getUsers({ page, pageSize, search, status }: GetUsersParams): Promise<PaginatedUsers> {
   const from = (page - 1) * pageSize;
   const trimmedSearch = search?.trim();
 
@@ -443,31 +453,36 @@ export async function getUsers({ page, pageSize, search }: GetUsersParams): Prom
     const idSet = new Set<string>(emailMatchIds);
     for (const row of (companyMatches.data ?? []) as { id: string }[]) idSet.add(row.id);
 
-    total = idSet.size;
-    if (total === 0) {
+    if (idSet.size === 0) {
       return { rows: [], total: 0, page, page_size: pageSize };
     }
 
-    const { data, error } = await supabaseAdmin
+    // count:"exact" so the status filter (which can't be applied to the
+    // in-memory idSet size) still yields a correct total.
+    let query = supabaseAdmin
       .from("profiles")
-      .select(PROFILE_WITH_WALLET_SELECT)
+      .select(PROFILE_WITH_WALLET_SELECT, { count: "exact" })
       .in("id", Array.from(idSet))
       .order("created_at", { ascending: false })
       .range(from, from + pageSize - 1);
+    if (status) query = query.eq("account_status", status);
+
+    const { data, error, count } = await query;
     if (error) throw error;
     profileRows = (data ?? []) as unknown as ProfileWithWallet[];
+    total = count ?? 0;
   } else {
-    const [{ data, error }, count] = await Promise.all([
-      supabaseAdmin
-        .from("profiles")
-        .select(PROFILE_WITH_WALLET_SELECT)
-        .order("created_at", { ascending: false })
-        .range(from, from + pageSize - 1),
-      headCount("profiles", (q) => q),
-    ]);
+    let query = supabaseAdmin
+      .from("profiles")
+      .select(PROFILE_WITH_WALLET_SELECT, { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (status) query = query.eq("account_status", status);
+
+    const { data, error, count } = await query;
     if (error) throw error;
     profileRows = (data ?? []) as unknown as ProfileWithWallet[];
-    total = count;
+    total = count ?? 0;
   }
 
   const userIds = profileRows.map((r) => r.id);
@@ -731,11 +746,12 @@ export async function getUseCaseBreakdown(): Promise<UseCaseBreakdownEntry[]> {
 }
 
 const USER_DETAIL_SELECT =
-  "id, company, role, use_case, created_at, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
+  "id, company, role, use_case, created_at, account_status, suspended_until, status_reason, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
 
 interface ProfileDetailRow extends ProfileWithWallet {
   role: string | null;
   use_case: string | null;
+  status_reason: string | null;
 }
 
 // Returns null when the id doesn't match any profile (unconfirmed signups
@@ -751,30 +767,37 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
 
   const typedProfile = profile as unknown as ProfileDetailRow;
 
-  const [flagResult, listResult, listsTotal, paymentResult, paymentsTotal, emailResult] = await Promise.all([
-    supabaseAdmin
-      .from("flagged_accounts")
-      .select("id, reason, source, status, created_at, reviewed_at, reviewed_by")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false }),
-    supabaseAdmin
-      .from("lists")
-      .select("id, name, kind, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    headCount("lists", (q) => q.eq("user_id", userId)),
-    supabaseAdmin
-      .from("payments")
-      .select(PAYMENT_SELECT)
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    headCount("payments", (q) => q.eq("user_id", userId)),
-    supabaseAdmin.auth.admin.getUserById(userId),
-  ]);
+  const [flagResult, moderationResult, listResult, listsTotal, paymentResult, paymentsTotal, emailResult] =
+    await Promise.all([
+      supabaseAdmin
+        .from("flagged_accounts")
+        .select("id, reason, source, status, created_at, reviewed_at, reviewed_by")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("moderation_actions")
+        .select("id, action, previous_status, new_status, reason, suspended_until, acted_by, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("lists")
+        .select("id, name, kind, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      headCount("lists", (q) => q.eq("user_id", userId)),
+      supabaseAdmin
+        .from("payments")
+        .select(PAYMENT_SELECT)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      headCount("payments", (q) => q.eq("user_id", userId)),
+      supabaseAdmin.auth.admin.getUserById(userId),
+    ]);
 
   if (flagResult.error) throw flagResult.error;
+  if (moderationResult.error) throw moderationResult.error;
   if (listResult.error) throw listResult.error;
   if (paymentResult.error) throw paymentResult.error;
 
@@ -793,7 +816,13 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     lifetime_purchased: wallet?.lifetime_purchased ?? 0,
     lifetime_consumed: wallet?.lifetime_consumed ?? 0,
     is_flagged: flags.some((f) => f.status === "open"),
+    account_status: typedProfile.account_status ?? "active",
+    suspended_until: typedProfile.suspended_until ?? null,
   };
+
+  const moderationActions = await resolveActorEmails(
+    (moderationResult.data ?? []) as Omit<ModerationActionRow, "acted_by_email">[],
+  );
 
   // All rows here belong to the one user already looked up above — no need
   // to pay for attachEmails' per-row getUserById lookups.
@@ -803,12 +832,31 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     user,
     role: typedProfile.role,
     use_case: typedProfile.use_case,
+    status_reason: typedProfile.status_reason,
     flags,
+    moderation_actions: moderationActions,
     lists: (listResult.data ?? []) as { id: string; name: string; kind: string; created_at: string }[],
     lists_total: listsTotal,
     payments,
     payments_total: paymentsTotal,
   };
+}
+
+// Resolves acted_by ids to admin emails for the moderation history display.
+// De-duplicates lookups so a user with many actions from the same admin
+// costs one getUserById per distinct admin, not one per row.
+async function resolveActorEmails(
+  rows: Omit<ModerationActionRow, "acted_by_email">[],
+): Promise<ModerationActionRow[]> {
+  const emailByActor = new Map<string, string | null>();
+  const actorIds = [...new Set(rows.map((r) => r.acted_by).filter((id): id is string => Boolean(id)))];
+  await Promise.all(
+    actorIds.map(async (id) => {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+      emailByActor.set(id, data.user?.email ?? null);
+    }),
+  );
+  return rows.map((r) => ({ ...r, acted_by_email: r.acted_by ? emailByActor.get(r.acted_by) ?? null : null }));
 }
 
 interface GetUserLedgerParams {
@@ -846,6 +894,98 @@ export async function reviewFlaggedAccount(
     .update({ status: params.status, reviewed_at: new Date().toISOString(), reviewed_by: params.reviewedBy })
     .eq("id", flaggedAccountId);
   if (error) throw error;
+}
+
+export type SetUserStatusResult =
+  | { ok: false; reason: "not_found" | "target_is_admin" }
+  | { ok: true; previous_status: AccountStatus; new_status: AccountStatus; auth_layer_applied: boolean };
+
+const ACTION_TO_STATUS: Record<ModerationAction, AccountStatus> = {
+  freeze: "frozen",
+  suspend: "suspended",
+  ban: "banned",
+  reactivate: "active",
+};
+
+// GoTrue's ban_duration accepts units only up to hours, so a "permanent" ban
+// is expressed as a very long horizon (~100 years); "none" lifts it.
+const PERMANENT_BAN_DURATION = "876000h";
+
+// The single path for changing a user's moderation status. Ordering is
+// deliberate:
+//   1. read current status + is_admin  (existence check, admin guard, and the
+//      previous_status recorded in the audit row)
+//   2. update profiles                 (the source of truth the app-layer
+//      enforceAccountStatus gate reads on every request)
+//   3. write the audit row
+//   4. apply the GoTrue ban / unban    (best-effort auth-layer hardening)
+// Steps 2-3 are the authoritative outcome; a 'banned' status is fully
+// enforced by the app-layer gate even with no GoTrue call at all, so if step
+// 4 fails we deliberately do NOT roll the status back — we return
+// auth_layer_applied:false so the route can log it and an admin can retry the
+// idempotent action to complete the auth-layer kill.
+export async function setUserAccountStatus(params: {
+  userId: string;
+  action: ModerationAction;
+  reason: string | null;
+  suspendedUntil: string | null;
+  actedBy: string;
+}): Promise<SetUserStatusResult> {
+  const { userId, action, reason, suspendedUntil, actedBy } = params;
+
+  const { data: current, error: readError } = await supabaseAdmin
+    .from("profiles")
+    .select("account_status, is_admin")
+    .eq("id", userId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!current) return { ok: false, reason: "not_found" };
+  // An admin can never be moderated through this path — demotion is a
+  // separate, service-role-only concern (prevent_is_admin_self_escalation).
+  if (current.is_admin) return { ok: false, reason: "target_is_admin" };
+
+  const previousStatus = (current.account_status ?? "active") as AccountStatus;
+  const newStatus = ACTION_TO_STATUS[action];
+  const until = action === "suspend" ? suspendedUntil : null;
+
+  const { error: updateError } = await supabaseAdmin
+    .from("profiles")
+    .update({
+      account_status: newStatus,
+      status_reason: action === "reactivate" ? null : reason,
+      suspended_until: until,
+      status_updated_at: new Date().toISOString(),
+      status_updated_by: actedBy,
+    })
+    .eq("id", userId);
+  if (updateError) throw updateError;
+
+  const { error: auditError } = await supabaseAdmin.from("moderation_actions").insert({
+    user_id: userId,
+    action,
+    previous_status: previousStatus,
+    new_status: newStatus,
+    reason,
+    suspended_until: until,
+    acted_by: actedBy,
+  });
+  if (auditError) throw auditError;
+
+  // Auth-layer effects are keyed on the status transition, not the action
+  // name: entering 'banned' applies the GoTrue ban, and leaving 'banned' for
+  // ANY other status (active/frozen/suspended) must lift it — otherwise a
+  // banned -> frozen change would leave the user locked out of authentication
+  // while the app-level status claims they only have a soft freeze.
+  let authLayerApplied = true;
+  if (newStatus === "banned") {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: PERMANENT_BAN_DURATION });
+    if (error) authLayerApplied = false;
+  } else if (previousStatus === "banned") {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: "none" });
+    if (error) authLayerApplied = false;
+  }
+
+  return { ok: true, previous_status: previousStatus, new_status: newStatus, auth_layer_applied: authLayerApplied };
 }
 
 // ── v4: runs monitor, lists browser, company rollup, admins ──

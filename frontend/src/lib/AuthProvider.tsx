@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
+import { ACCOUNT_STATUS_EVENT, type AccountStatus } from "./accountStatus";
 
 export interface Profile {
   id: string;
@@ -8,6 +9,9 @@ export interface Profile {
   role: string | null;
   use_case: string | null;
   is_admin: boolean;
+  account_status: AccountStatus;
+  suspended_until: string | null;
+  status_reason: string | null;
 }
 
 interface AuthContextValue {
@@ -28,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadProfile(userId: string) {
     const { data } = await supabase
       .from("profiles")
-      .select("id, company, role, use_case, is_admin")
+      .select("id, company, role, use_case, is_admin, account_status, suspended_until, status_reason")
       .eq("id", userId)
       .maybeSingle();
     setProfile(data);
@@ -53,6 +57,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     loadProfile(session.user.id);
+  }, [session?.user?.id]);
+
+  // Re-read the profile when the API layer signals a status-related 403, so a
+  // freeze/suspend/ban applied by an admin mid-session flips the UI (banner or
+  // lockout screen) on the user's next action, without needing a reload.
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+    const handler = () => {
+      loadProfile(userId);
+    };
+    window.addEventListener(ACCOUNT_STATUS_EVENT, handler);
+    return () => window.removeEventListener(ACCOUNT_STATUS_EVENT, handler);
   }, [session?.user?.id]);
 
   // `profile` lags one async round-trip behind `session` on every sign-in —

@@ -15,6 +15,13 @@ export const FLAGGED_STATUS_VARIANT: Record<string, string> = {
   dismissed: "secondary",
 };
 
+export const ACCOUNT_STATUS_VARIANT: Record<string, string> = {
+  active: "success",
+  frozen: "info",
+  suspended: "warning",
+  banned: "danger",
+};
+
 export const LEDGER_TYPE_VARIANT: Record<string, string> = {
   purchase: "success",
   promo_grant: "success",

@@ -1,5 +1,6 @@
 import { apiDownload, apiGet, apiPatch } from "../../lib/api";
 import type {
+  AccountStatus,
   AdminAccountRow,
   AdminOverview,
   CompanyRollupEntry,
@@ -11,9 +12,11 @@ import type {
   PaginatedRuns,
   PaginatedTransactions,
   PaginatedUsers,
+  ModerationAction,
   PaymentStatus,
   RunStatus,
   RunsKpis,
+  SetUserStatusResponse,
   SystemHealthResponse,
   TransactionsKpis,
   TrendsResponse,
@@ -65,13 +68,26 @@ export interface FetchUsersParams {
   page: number;
   pageSize: number;
   search?: string;
+  status?: AccountStatus;
   signal?: AbortSignal;
 }
 
-export function fetchUsers({ page, pageSize, search, signal }: FetchUsersParams): Promise<PaginatedUsers> {
+export function fetchUsers({ page, pageSize, search, status, signal }: FetchUsersParams): Promise<PaginatedUsers> {
   const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) params.set("search", search);
+  if (status) params.set("status", status);
   return apiGet<PaginatedUsers>(`/api/admin/users?${params.toString()}`, signal);
+}
+
+export interface SetUserStatusParams {
+  action: ModerationAction;
+  reason?: string;
+  // ISO timestamp; only meaningful for the 'suspend' action.
+  until?: string;
+}
+
+export function setUserStatus(userId: string, params: SetUserStatusParams): Promise<SetUserStatusResponse> {
+  return apiPatch<SetUserStatusResponse>(`/api/admin/users/${encodeURIComponent(userId)}/status`, params);
 }
 
 export function fetchUserDetail(userId: string): Promise<UserDetail> {

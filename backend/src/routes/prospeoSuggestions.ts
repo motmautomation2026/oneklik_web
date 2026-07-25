@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 
 const router = Router();
 
@@ -33,7 +34,7 @@ const SUGGESTION_TYPES: Record<string, SuggestionTypeConfig> = {
   job_title: { searchField: "job_title_search", responseKey: "job_title_suggestions", mapToStrings: asStringArray },
 };
 
-router.post("/prospeo/suggestions", requireAuth, async (req: Request, res: Response) => {
+router.post("/prospeo/suggestions", requireAuth, enforceAccountStatus({ allowFrozen: true }), async (req: Request, res: Response) => {
   const apiKey = process.env.PROSPEO_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: "PROSPEO_API_KEY not configured" });

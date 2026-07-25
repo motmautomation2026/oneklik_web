@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 
 const router = Router();
@@ -15,7 +16,7 @@ function dedupeKey(kind: "company" | "people", data: Record<string, unknown>): s
   return typeof raw === "string" ? raw.trim().toLowerCase() : "";
 }
 
-router.post("/lists/merge", requireAuth, async (req: Request, res: Response) => {
+router.post("/lists/merge", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { list_ids?: string[]; name?: string };
   const listIds = Array.isArray(body.list_ids) ? [...new Set(body.list_ids.filter(Boolean))] : [];
 

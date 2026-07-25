@@ -24,8 +24,9 @@ import {
   getUsers,
   getUsersKpis,
   reviewFlaggedAccount,
+  setUserAccountStatus,
 } from "./queries.js";
-import type { FlaggedStatus, PaymentRow, PaymentStatus, RunStatus } from "./types.js";
+import type { AccountStatus, FlaggedStatus, ModerationAction, PaymentRow, PaymentStatus, RunStatus } from "./types.js";
 
 const router = Router();
 
@@ -56,6 +57,16 @@ const RUN_STATUSES: RunStatus[] = ["pending", "running", "completed", "cancelled
 function runStatusParam(value: unknown): RunStatus | undefined {
   return typeof value === "string" && (RUN_STATUSES as string[]).includes(value) ? (value as RunStatus) : undefined;
 }
+
+const ACCOUNT_STATUSES: AccountStatus[] = ["active", "frozen", "suspended", "banned"];
+
+function accountStatusParam(value: unknown): AccountStatus | undefined {
+  return typeof value === "string" && (ACCOUNT_STATUSES as string[]).includes(value)
+    ? (value as AccountStatus)
+    : undefined;
+}
+
+const MODERATION_ACTIONS: ModerationAction[] = ["freeze", "suspend", "ban", "reactivate"];
 
 // Minimal CSV writer for the export routes — escapes commas/quotes/newlines
 // per RFC 4180. Some exported fields (profiles.company, in particular) are
@@ -310,6 +321,74 @@ router.get("/users/:id/ledger", async (req: Request, res: Response) => {
   }
 });
 
+// Freeze / suspend / ban / reactivate a user. Guards: a reason is required
+// for any restrictive action; `until` (a future ISO timestamp) only applies
+// to 'suspend'; an admin can moderate neither themselves nor another admin
+// (the latter is enforced in setUserAccountStatus against the DB).
+router.patch("/users/:id/status", async (req: Request, res: Response) => {
+  const targetId = req.params.id;
+  const actorId = req.user!.id;
+  const body = (req.body ?? {}) as { action?: string; reason?: string; until?: string };
+
+  if (!body.action || !(MODERATION_ACTIONS as string[]).includes(body.action)) {
+    return res.status(400).json({ error: "action must be one of: freeze, suspend, ban, reactivate" });
+  }
+  const action = body.action as ModerationAction;
+
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (action !== "reactivate" && !reason) {
+    return res.status(400).json({ error: "A reason is required to freeze, suspend, or ban a user" });
+  }
+
+  let suspendedUntil: string | null = null;
+  if (action === "suspend" && body.until != null && body.until !== "") {
+    const parsed = new Date(body.until);
+    if (Number.isNaN(parsed.getTime())) {
+      return res.status(400).json({ error: "until must be a valid date" });
+    }
+    if (parsed.getTime() <= Date.now()) {
+      return res.status(400).json({ error: "until must be a future date" });
+    }
+    suspendedUntil = parsed.toISOString();
+  }
+
+  if (targetId === actorId) {
+    return res.status(400).json({ error: "You can't change your own account status" });
+  }
+
+  try {
+    const result = await setUserAccountStatus({
+      userId: targetId,
+      action,
+      reason: reason || null,
+      suspendedUntil,
+      actedBy: actorId,
+    });
+
+    if (!result.ok) {
+      if (result.reason === "not_found") return res.status(404).json({ error: "User not found" });
+      return res.status(403).json({ error: "You can't change another admin's account status" });
+    }
+
+    if (!result.auth_layer_applied) {
+      req.log.error(
+        { targetId, action },
+        "admin: account status updated but GoTrue auth-layer update failed — retry to complete the ban/unban",
+      );
+    }
+
+    return res.json({
+      ok: true,
+      previous_status: result.previous_status,
+      new_status: result.new_status,
+      auth_layer_applied: result.auth_layer_applied,
+    });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to change user status");
+    return res.status(500).json({ error: "Could not change user status" });
+  }
+});
+
 const REVIEWABLE_FLAG_STATUSES: FlaggedStatus[] = ["reviewed", "dismissed"];
 
 router.patch("/flagged-accounts/:id", async (req: Request, res: Response) => {
@@ -333,8 +412,9 @@ router.get("/users", async (req: Request, res: Response) => {
   const page = clampInt(req.query.page, 1, 1, 100_000);
   const pageSize = clampInt(req.query.pageSize, 25, 1, 100);
   const search = stringParam(req.query.search);
+  const status = accountStatusParam(req.query.status);
   try {
-    const result = await getUsers({ page, pageSize, search });
+    const result = await getUsers({ page, pageSize, search, status });
     return res.json(result);
   } catch (err) {
     req.log.error({ err }, "admin: failed to load users");

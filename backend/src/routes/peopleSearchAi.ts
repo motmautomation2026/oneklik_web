@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizePerson, type Person } from "../lib/revealFlow.js";
 
@@ -19,7 +20,7 @@ function extractPersonRows(data: unknown): unknown[] {
   return [];
 }
 
-router.post("/hv/people-search-ai", requireAuth, async (req: Request, res: Response) => {
+router.post("/hv/people-search-ai", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const webhookUrl = process.env["people_search_ai_webhook"];
   if (!webhookUrl) {
     return res.status(500).json({ error: "people_search_ai_webhook not configured" });

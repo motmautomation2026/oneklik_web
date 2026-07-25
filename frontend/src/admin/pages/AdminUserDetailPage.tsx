@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Alert, Badge, Button, Spinner } from "react-bootstrap";
 import { Link, useParams } from "react-router-dom";
 import { fetchUserDetail, fetchUserLedger, reviewFlaggedAccount } from "../api/adminApi";
-import { FLAGGED_STATUS_VARIANT, LEDGER_TYPE_VARIANT, PAYMENT_STATUS_VARIANT } from "../badgeVariants";
+import { ACCOUNT_STATUS_VARIANT, FLAGGED_STATUS_VARIANT, LEDGER_TYPE_VARIANT, PAYMENT_STATUS_VARIANT } from "../badgeVariants";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
+import ModerationPanel from "../components/ModerationPanel";
 import PaginationBar from "../components/PaginationBar";
 import SectionCard from "../components/SectionCard";
 import { formatDateTime, formatInrFromMinorUnits, formatNumber } from "../format";
@@ -97,7 +98,8 @@ export default function AdminUserDetailPage() {
     );
   }
 
-  const { user, role, use_case, flags, lists, lists_total, payments, payments_total } = detail.data;
+  const { user, role, use_case, status_reason, flags, moderation_actions, lists, lists_total, payments, payments_total } =
+    detail.data;
   const openFlags = flags.filter((f) => f.status === "open");
 
   return (
@@ -107,9 +109,14 @@ export default function AdminUserDetailPage() {
       </Link>
 
       <div className="mb-4">
-        <h1 className="h4 mb-1" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-          {user.email ?? user.user_id}
-        </h1>
+        <div className="d-flex align-items-center gap-2 mb-1">
+          <h1 className="h4 mb-0" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+            {user.email ?? user.user_id}
+          </h1>
+          {user.account_status !== "active" && (
+            <Badge bg={ACCOUNT_STATUS_VARIANT[user.account_status] ?? "secondary"}>{user.account_status}</Badge>
+          )}
+        </div>
         <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
           {user.company ?? "No company"}
           {role ? ` · ${role}` : ""}
@@ -147,6 +154,13 @@ export default function AdminUserDetailPage() {
           </div>
         </Alert>
       ))}
+
+      <ModerationPanel
+        user={user}
+        statusReason={status_reason}
+        moderationActions={moderation_actions}
+        onChanged={() => setRefetchKey((k) => k + 1)}
+      />
 
       <div className="row g-3 mb-4">
         <div className="col-6 col-lg-3">

@@ -61,6 +61,22 @@ export interface SystemHealth {
   open_flagged_accounts: number;
 }
 
+export type AccountStatus = "active" | "frozen" | "suspended" | "banned";
+
+export type ModerationAction = "freeze" | "suspend" | "ban" | "reactivate";
+
+export interface ModerationActionRow {
+  id: string;
+  action: ModerationAction;
+  previous_status: AccountStatus;
+  new_status: AccountStatus;
+  reason: string | null;
+  suspended_until: string | null;
+  acted_by: string | null;
+  acted_by_email: string | null;
+  created_at: string;
+}
+
 export interface AdminUserRow {
   user_id: string;
   email: string | null;
@@ -72,6 +88,8 @@ export interface AdminUserRow {
   lifetime_purchased: number;
   lifetime_consumed: number;
   is_flagged: boolean;
+  account_status: AccountStatus;
+  suspended_until: string | null;
 }
 
 export interface PaginatedUsers {
@@ -178,7 +196,9 @@ export interface UserDetail {
   user: AdminUserRow;
   role: string | null;
   use_case: string | null;
+  status_reason: string | null;
   flags: FlaggedAccountRow[];
+  moderation_actions: ModerationActionRow[];
   lists: { id: string; name: string; kind: string; created_at: string }[];
   lists_total: number;
   payments: PaymentRow[];

@@ -2,17 +2,18 @@ import type { Request, Response } from "express";
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { razorpay, RAZORPAY_KEY_ID } from "../lib/razorpay.js";
 import { CREDIT_PACKS, findPack } from "../lib/creditPacks.js";
 
 const router = Router();
 
-router.get("/payments/packs", requireAuth, (_req: Request, res: Response) => {
+router.get("/payments/packs", requireAuth, enforceAccountStatus({ allowFrozen: true }), (_req: Request, res: Response) => {
   return res.json({ packs: CREDIT_PACKS });
 });
 
-router.post("/payments/checkout", requireAuth, async (req: Request, res: Response) => {
+router.post("/payments/checkout", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const body = (req.body ?? {}) as { pack_id?: string };
   const pack = typeof body.pack_id === "string" ? findPack(body.pack_id) : undefined;
 
@@ -78,7 +79,7 @@ router.post("/payments/checkout", requireAuth, async (req: Request, res: Respons
 // Polled by the frontend after the checkout modal closes — the webhook is
 // the only thing that ever actually flips this to "success" server-side,
 // never the client-side Razorpay callback (that can be faked/interrupted).
-router.get("/payments/:id/status", requireAuth, async (req: Request, res: Response) => {
+router.get("/payments/:id/status", requireAuth, enforceAccountStatus({ allowFrozen: true }), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const { data: payment, error } = await supabaseAdmin
     .from("payments")

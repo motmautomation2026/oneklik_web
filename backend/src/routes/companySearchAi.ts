@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizeCompany, extractRows, type Company } from "../lib/companyNormalize.js";
 
@@ -11,7 +12,7 @@ const router = Router();
 // pinned to a fixed ceiling instead of a user-provided company_count.
 const AI_SEARCH_CAP = 25;
 
-router.post("/hv/company-search-ai", requireAuth, async (req: Request, res: Response) => {
+router.post("/hv/company-search-ai", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const webhookUrl = process.env["company_search_ai_webhook"];
   if (!webhookUrl) {
     return res.status(500).json({ error: "company_search_ai_webhook not configured" });

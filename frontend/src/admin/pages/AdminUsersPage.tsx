@@ -6,43 +6,60 @@ import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
 import PaginationBar from "../components/PaginationBar";
 import SectionCard from "../components/SectionCard";
+import { ACCOUNT_STATUS_VARIANT } from "../badgeVariants";
 import { formatDateTime, formatInrFromMinorUnits, formatNumber } from "../format";
 import { useAdminResource } from "../hooks/useAdminResource";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { ADMIN_CHART_COLORS } from "../theme";
-import type { AdminUserRow, CompanyRollupEntry } from "../types";
+import type { AccountStatus, AdminUserRow, CompanyRollupEntry } from "../types";
 
 const PAGE_SIZE = 25;
+
+const ACCOUNT_STATUSES: AccountStatus[] = ["active", "frozen", "suspended", "banned"];
+
+// Narrow an arbitrary URL param to a valid AccountStatus, or undefined.
+function parseStatusParam(value: string | null): AccountStatus | undefined {
+  return value && (ACCOUNT_STATUSES as string[]).includes(value) ? (value as AccountStatus) : undefined;
+}
 
 export default function AdminUsersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(() => Number(searchParams.get("page")) || 1);
   const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
+  const [statusFilter, setStatusFilter] = useState<AccountStatus | "">(() => parseStatusParam(searchParams.get("status")) ?? "");
   const search = useDebouncedValue(searchInput);
   const [exporting, setExporting] = useState(false);
 
-  // Mirror page/search into the URL so the view is bookmarkable and survives
-  // browser back/forward — read once as initial state above, kept in sync
-  // here on every change.
+  // Mirror page/search/status into the URL so the view is bookmarkable and
+  // survives browser back/forward — read once as initial state above, kept in
+  // sync here on every change.
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
     if (page > 1) next.set("page", String(page));
     else next.delete("page");
     if (search) next.set("search", search);
     else next.delete("search");
+    if (statusFilter) next.set("status", statusFilter);
+    else next.delete("status");
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search]);
+  }, [page, search, statusFilter]);
 
   const kpis = useAdminResource(fetchUsersKpis, []);
   const topCompanies = useAdminResource(() => fetchTopCompanies(10), []);
   const users = useAdminResource(
-    (signal) => fetchUsers({ page, pageSize: PAGE_SIZE, search: search || undefined, signal }),
-    [page, search],
+    (signal) =>
+      fetchUsers({ page, pageSize: PAGE_SIZE, search: search || undefined, status: statusFilter || undefined, signal }),
+    [page, search, statusFilter],
   );
 
   function handleSearchChange(value: string) {
     setSearchInput(value);
+    setPage(1);
+  }
+
+  function handleStatusChange(value: string) {
+    setStatusFilter(parseStatusParam(value) ?? "");
     setPage(1);
   }
 
@@ -90,6 +107,13 @@ export default function AdminUsersPage() {
       ),
     },
     { key: "company", header: "Company", render: (row: AdminUserRow) => row.company ?? "—" },
+    {
+      key: "status",
+      header: "Status",
+      render: (row: AdminUserRow) => (
+        <Badge bg={ACCOUNT_STATUS_VARIANT[row.account_status] ?? "secondary"}>{row.account_status}</Badge>
+      ),
+    },
     {
       key: "onboarded",
       header: "Onboarded",
@@ -200,6 +224,20 @@ export default function AdminUsersPage() {
               onChange={(e) => handleSearchChange(e.target.value)}
               style={{ maxWidth: 280 }}
             />
+            <Form.Select
+              size="sm"
+              value={statusFilter}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              style={{ maxWidth: 150 }}
+              aria-label="Filter by account status"
+            >
+              <option value="">All statuses</option>
+              {ACCOUNT_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </option>
+              ))}
+            </Form.Select>
             <Button size="sm" variant="outline-secondary" disabled={exporting} onClick={handleExport}>
               {exporting ? "Exporting…" : "Export CSV"}
             </Button>
@@ -212,7 +250,7 @@ export default function AdminUsersPage() {
               columns={columns}
               rows={users.data.rows}
               getRowKey={(row) => row.user_id}
-              emptyMessage={search ? "No users match that search" : "No users yet"}
+              emptyMessage={search || statusFilter ? "No users match those filters" : "No users yet"}
             />
             <PaginationBar page={page} pageSize={PAGE_SIZE} total={users.data.total} onPageChange={setPage} />
           </>

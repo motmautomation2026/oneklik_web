@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizePerson, type Person } from "../lib/revealFlow.js";
 
@@ -8,7 +9,7 @@ const router = Router();
 
 const MAX_URLS_PER_REQUEST = 50;
 
-router.post("/hv/linkedin-lookup", requireAuth, async (req: Request, res: Response) => {
+router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const webhookUrl = process.env["linkedin_lookup_webhook"];
   if (!webhookUrl) {
     return res.status(500).json({ error: "linkedin_lookup_webhook not configured" });

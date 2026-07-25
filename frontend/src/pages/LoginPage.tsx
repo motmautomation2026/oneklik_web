@@ -62,7 +62,12 @@ export default function LoginPage() {
               />
             </Form.Group>
             <Form.Group className="mb-3" controlId="loginPassword">
-              <Form.Label>Password</Form.Label>
+              <div className="d-flex justify-content-between align-items-center">
+                <Form.Label className="mb-0">Password</Form.Label>
+                <Link to="/forgot-password" className="small">
+                  Forgot password?
+                </Link>
+              </div>
               <Form.Control
                 type="password"
                 autoComplete="current-password"

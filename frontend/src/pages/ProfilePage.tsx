@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Card, Col, Container, Row } from "react-bootstrap";
 import AppLayout from "../components/AppLayout";
+import ChangePasswordCard from "../components/ChangePasswordCard";
 import { useAuth } from "../lib/AuthProvider";
 import { supabase } from "../lib/supabaseClient";
 
@@ -64,6 +65,8 @@ export default function ProfilePage() {
                 </dl>
               </Card.Body>
             </Card>
+
+            <ChangePasswordCard />
 
             <button className="btn btn-outline-danger btn-sm mt-3" onClick={handleSignOut}>
               Sign out

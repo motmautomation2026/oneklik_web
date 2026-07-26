@@ -206,7 +206,7 @@ router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (r
   }
 
   const emailAttempted = await chargeField("Email", 2, "email_enrich");
-  const phoneAttempted = await chargeField("Phone", 3, "mobile_enrich");
+  const phoneAttempted = await chargeField("Phone", 20, "mobile_enrich");
 
   const finalPeople = people.map((p, i) => ({
     ...p,

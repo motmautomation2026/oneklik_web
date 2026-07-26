@@ -228,7 +228,7 @@ export default function ListDetailPage() {
                           Revealing…
                         </>
                       ) : (
-                        "Reveal Phone (10 cr each)"
+                        "Reveal Phone (20 cr each)"
                       )}
                     </Button>
                   </>

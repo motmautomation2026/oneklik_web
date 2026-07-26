@@ -369,7 +369,7 @@ export default function PeopleSearchPage() {
                               Revealing…
                             </>
                           ) : (
-                            `Reveal Phone (${selected.size * 10} credits)`
+                            `Reveal Phone (${selected.size * 20} credits)`
                           )}
                         </Button>
                       </>

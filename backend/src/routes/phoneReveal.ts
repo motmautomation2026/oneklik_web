@@ -9,7 +9,7 @@ const router = Router();
 router.post("/hv/phone-reveal", requireAuth, enforceAccountStatus(), (req: Request, res: Response) =>
   runRevealBatch(req, res, {
     webhookEnvVar: "phone_finder_webhook",
-    creditsPerReveal: 10,
+    creditsPerReveal: 20,
     runType: "mobile_enrich",
     targetField: "Phone",
     listNamePrefix: "Phone Reveal",

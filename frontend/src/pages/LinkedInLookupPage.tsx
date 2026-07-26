@@ -148,11 +148,11 @@ export default function LinkedInLookupPage() {
                       </li>
                       <li>
                         <span>Phone found</span>
-                        <strong>3 credits</strong>
+                        <strong>20 credits</strong>
                       </li>
                       <li>
                         <span>Both found</span>
-                        <strong>5 credits</strong>
+                        <strong>22 credits</strong>
                       </li>
                       <li>
                         <span>Nothing found</span>

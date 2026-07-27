@@ -23,7 +23,7 @@ export type TicketCategory =
 
 export const SUPPORT_CATEGORIES: { value: TicketCategory; label: string; hint: string }[] = [
   { value: "account_access", label: "Account access & appeals", hint: "Locked out, restricted, or can't sign in" },
-  { value: "billing", label: "Billing & payments", hint: "Invoices, failed payments, receipts" },
+  { value: "billing", label: "Billing & payments", hint: "Receipts, failed payments, billing questions" },
   { value: "credits", label: "Credits & refunds", hint: "Credits missing, charged incorrectly" },
   { value: "data_quality", label: "Data quality", hint: "A revealed email or phone number was wrong" },
   { value: "bug", label: "Something is broken", hint: "An error or unexpected behaviour" },

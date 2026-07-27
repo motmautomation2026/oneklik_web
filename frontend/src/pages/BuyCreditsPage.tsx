@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, Card, Col, Container, Row, Spinner } from "react-bootstrap";
-import { CheckCircleFill } from "react-bootstrap-icons";
+import { Alert, Badge, Button, Card, Col, Container, OverlayTrigger, Row, Spinner, Tooltip } from "react-bootstrap";
+import { CheckCircleFill, InfoCircle } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import { apiGet, apiPost } from "../lib/api";
 
@@ -42,11 +42,11 @@ const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
 
 const PLAN_FEATURES = [
   "Company & People Search",
-  "Verified Email & Phone Reveal",
+  "Email & Phone Reveal",
   "LinkedIn Lookup",
   "AI-powered search",
   "Save to Lists & export",
-  "Credits never expire",
+  "Credits Roll Over",
 ];
 
 function loadRazorpayScript(): Promise<void> {
@@ -194,7 +194,20 @@ export default function BuyCreditsPage() {
                       One-time purchase, added to your balance immediately after payment.
                       {info && <> Best for {info.bestFor.toLowerCase()}.</>}
                     </p>
-                    <div className="h3 mb-3">₹{pack.priceInr.toLocaleString()}</div>
+                    <div className="h3 mb-3 d-flex align-items-center gap-2">
+                      ₹{pack.priceInr.toLocaleString()}
+                      <OverlayTrigger
+                        placement="top"
+                        overlay={
+                          <Tooltip>
+                            <div>2 credits per email</div>
+                            <div>20 credits per contact</div>
+                          </Tooltip>
+                        }
+                      >
+                        <InfoCircle size={14} className="text-body-secondary" style={{ cursor: "help" }} />
+                      </OverlayTrigger>
+                    </div>
                     <ul className="list-unstyled small mb-3">
                       {PLAN_FEATURES.map((feature) => (
                         <li key={feature} className="d-flex align-items-center gap-2 mb-1">

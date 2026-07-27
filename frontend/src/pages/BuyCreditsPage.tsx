@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, Card, Col, Container, Modal, Row, Spinner } from "react-bootstrap";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Col,
+  Container,
+  Modal,
+  OverlayTrigger,
+  Row,
+  Spinner,
+  Tooltip,
+} from "react-bootstrap";
+import { CheckCircleFill, InfoCircle } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import BillingDetailsForm, { type BillingProfile } from "../components/BillingDetailsForm";
 import { apiGet, apiPost } from "../lib/api";
@@ -42,6 +55,22 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+const SALES_EMAIL = "sales@oneklik.com";
+
+const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
+  starter: { label: "Starter", bestFor: "Individual users" },
+  growth: { label: "Growth", bestFor: "Small teams" },
+  business: { label: "Business", bestFor: "Growing businesses" },
+};
+
+const PLAN_FEATURES = [
+  "Company & People Search",
+  "Email & Phone Reveal",
+  "LinkedIn Lookup",
+  "AI-powered search",
+  "Save to Lists & export",
+  "Credits Roll Over",
+];
 
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -71,6 +100,17 @@ export default function BuyCreditsPage() {
   const [billingProfile, setBillingProfile] = useState<BillingProfile | null>(null);
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [pendingPack, setPendingPack] = useState<CreditPack | null>(null);
+  const [emailCopied, setEmailCopied] = useState(false);
+
+  async function handleCopyEmail() {
+    try {
+      await navigator.clipboard.writeText(SALES_EMAIL);
+      setEmailCopied(true);
+      setTimeout(() => setEmailCopied(false), 2000);
+    } catch {
+      // Clipboard API can be unavailable — email is already shown as plain text.
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -195,54 +235,127 @@ export default function BuyCreditsPage() {
           </div>
         ) : (
           <Row className="g-4">
-            {packs.map((pack) => (
-              <Col xs={12} md={4} key={pack.id}>
-                <Card className={`shadow-sm h-100 ${pack.comingSoon ? "opacity-75" : ""}`}>
-                  <Card.Body className="d-flex flex-column">
-                    {pack.comingSoon ? (
-                      <>
-                        <Badge bg="secondary" className="mb-3 align-self-start">
-                          Coming soon
-                        </Badge>
-                        <h2 className="h5">More pack sizes</h2>
-                        <p className="text-body-secondary small flex-grow-1">
-                          Additional credit packs will be available here soon.
-                        </p>
-                        <Button variant="outline-secondary" disabled className="w-100">
-                          Not available yet
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <h2 className="h5">{pack.credits.toLocaleString()} credits</h2>
-                        <p className="text-body-secondary small flex-grow-1">
-                          One-time purchase. GST is added at checkout; credits appear after payment confirmation.
-                        </p>
-                        <div className="mb-3">
-                          <div className="h3 mb-1">{formatMoney(pack.price_minor_units, pack.currency)}</div>
-                          <div className="text-body-secondary small">+ {taxPercentLabel(pack.tax_rate_bps)} GST</div>
-                        </div>
-                        <Button
-                          variant="primary"
-                          className="w-100"
-                          disabled={buyingPackId === pack.id || polling}
-                          onClick={() => handleBuy(pack)}
-                        >
-                          {buyingPackId === pack.id ? (
-                            <>
-                              <Spinner animation="border" size="sm" className="me-2" />
-                              Opening checkout…
-                            </>
-                          ) : (
-                            "Buy Now"
+            {packs.map((pack) => {
+              const info = PLAN_INFO[pack.id];
+              return (
+                <Col xs={12} md={6} lg={3} key={pack.id}>
+                  <Card className={`shadow-sm h-100 ${pack.comingSoon ? "opacity-75" : ""}`}>
+                    <Card.Body className="d-flex flex-column">
+                      {pack.comingSoon ? (
+                        <>
+                          <Badge bg="secondary" className="mb-3 align-self-start">
+                            Coming soon
+                          </Badge>
+                          <h2 className="h5">More pack sizes</h2>
+                          <p className="text-body-secondary small flex-grow-1">
+                            Additional credit packs will be available here soon.
+                          </p>
+                          <Button variant="outline-secondary" disabled className="w-100">
+                            Not available yet
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          {info && (
+                            <Badge bg="secondary" className="mb-3 align-self-start">
+                              {info.label}
+                            </Badge>
                           )}
-                        </Button>
-                      </>
-                    )}
-                  </Card.Body>
-                </Card>
-              </Col>
-            ))}
+                          <h2 className="h5">{pack.credits.toLocaleString()} credits</h2>
+                          <p className="text-body-secondary small flex-grow-1">
+                            One-time purchase. GST is added at checkout; credits appear after payment
+                            confirmation.
+                            {info && <> Best for {info.bestFor.toLowerCase()}.</>}
+                          </p>
+                          <div className="mb-3">
+                            <div className="h3 mb-1 d-flex align-items-center gap-2">
+                              {formatMoney(pack.price_minor_units, pack.currency)}
+                              <OverlayTrigger
+                                placement="top"
+                                overlay={
+                                  <Tooltip>
+                                    <div>2 credits per email</div>
+                                    <div>20 credits per contact</div>
+                                  </Tooltip>
+                                }
+                              >
+                                <InfoCircle
+                                  size={14}
+                                  className="text-body-secondary"
+                                  style={{ cursor: "help" }}
+                                />
+                              </OverlayTrigger>
+                            </div>
+                            <div className="text-body-secondary small">
+                              + {taxPercentLabel(pack.tax_rate_bps)} GST
+                            </div>
+                          </div>
+                          <ul className="list-unstyled small mb-3">
+                            {PLAN_FEATURES.map((feature) => (
+                              <li key={feature} className="d-flex align-items-center gap-2 mb-1">
+                                <CheckCircleFill className="text-primary flex-shrink-0" size={14} />
+                                <span>{feature}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <Button
+                            variant="primary"
+                            className="w-100"
+                            disabled={buyingPackId === pack.id || polling}
+                            onClick={() => handleBuy(pack)}
+                          >
+                            {buyingPackId === pack.id ? (
+                              <>
+                                <Spinner animation="border" size="sm" className="me-2" />
+                                Opening checkout…
+                              </>
+                            ) : (
+                              "Buy Now"
+                            )}
+                          </Button>
+                        </>
+                      )}
+                    </Card.Body>
+                  </Card>
+                </Col>
+              );
+            })}
+            <Col xs={12} md={6} lg={3}>
+              <Card className="shadow-sm h-100">
+                <Card.Body className="d-flex flex-column">
+                  <Badge bg="secondary" className="mb-3 align-self-start">
+                    Custom
+                  </Badge>
+                  <h2 className="h5">Enterprise</h2>
+                  <p className="text-body-secondary small flex-grow-1">
+                    Custom credit volume for large organizations. Get in touch to set up a plan.
+                  </p>
+                  <ul className="list-unstyled small mb-3">
+                    {[...PLAN_FEATURES, "Custom credit volume", "Priority support"].map((feature) => (
+                      <li key={feature} className="d-flex align-items-center gap-2 mb-1">
+                        <CheckCircleFill className="text-primary flex-shrink-0" size={14} />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Button
+                    variant="outline-primary"
+                    className="w-100"
+                    href={`mailto:${SALES_EMAIL}?subject=One-Klik%20Enterprise%20plan`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Contact Sales
+                  </Button>
+                  <div className="d-flex align-items-center justify-content-center gap-2 mt-2">
+                    <span className="text-body-secondary small">{SALES_EMAIL}</span>
+                    <Button variant="link" size="sm" className="p-0" onClick={handleCopyEmail}>
+                      {emailCopied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
           </Row>
         )}
       </Container>
@@ -253,7 +366,8 @@ export default function BuyCreditsPage() {
         </Modal.Header>
         <Modal.Body>
           <p className="text-body-secondary small">
-            Needed once for your receipt. State decides CGST+SGST vs IGST. You can edit these later under Billing.
+            Needed once for your receipt. State decides CGST+SGST vs IGST. You can edit these later under
+            Billing.
           </p>
           <BillingDetailsForm
             initial={billingProfile}

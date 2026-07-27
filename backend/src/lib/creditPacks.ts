@@ -22,7 +22,7 @@ export interface CreditPack {
 export const CREDIT_PACKS: CreditPack[] = [
   {
     id: "starter",
-    name: "One-Klik Credits Pack",
+    name: "Starter Credits Pack",
     credits: 4000,
     priceMinorUnits: 600_000, // ₹6,000.00
     currency: "INR",
@@ -34,24 +34,24 @@ export const CREDIT_PACKS: CreditPack[] = [
   {
     id: "growth",
     name: "Growth Credits Pack",
-    credits: 0,
-    priceMinorUnits: 0,
+    credits: 12000,
+    priceMinorUnits: 1_700_000, // ₹17,000.00
     currency: "INR",
     taxRateBps: 1800,
     isTaxInclusive: false,
     sacCode: "998313",
-    comingSoon: true,
+    comingSoon: false,
   },
   {
-    id: "scale",
-    name: "Scale Credits Pack",
-    credits: 0,
-    priceMinorUnits: 0,
+    id: "business",
+    name: "Business Credits Pack",
+    credits: 20000,
+    priceMinorUnits: 2_800_000, // ₹28,000.00
     currency: "INR",
     taxRateBps: 1800,
     isTaxInclusive: false,
     sacCode: "998313",
-    comingSoon: true,
+    comingSoon: false,
   },
 ];
 

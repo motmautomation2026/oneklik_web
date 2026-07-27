@@ -84,6 +84,40 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   URL.revokeObjectURL(url);
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: await authHeader(),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    notifyIfAccountRestricted(json);
+    throw new Error(json.error || `Request failed (${res.status})`);
+  }
+  return json as T;
+}
+
+export async function apiGetText(path: string, signal?: AbortSignal): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "GET",
+    headers: {
+      Authorization: await authHeader(),
+    },
+    signal,
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    notifyIfAccountRestricted(json);
+    throw new Error((json as { error?: string }).error || `Request failed (${res.status})`);
+  }
+  return res.text();
+}
+
 export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "GET",

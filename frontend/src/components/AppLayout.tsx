@@ -299,6 +299,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <Dropdown.Menu>
                   <Dropdown.Item onClick={() => navigate("/profile")}>Profile</Dropdown.Item>
                   <Dropdown.Item onClick={() => navigate("/payments")}>Payments</Dropdown.Item>
+                  <Dropdown.Item onClick={() => navigate("/billing/details")}>Billing details</Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item onClick={handleSignOut}>Sign out</Dropdown.Item>
                 </Dropdown.Menu>

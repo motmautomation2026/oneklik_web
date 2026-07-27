@@ -3,6 +3,8 @@ import { Router } from "express";
 import express from "express";
 import crypto from "node:crypto";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { razorpay } from "../lib/razorpay.js";
+import { issueInvoiceForPayment, type PackSnapshotRow } from "../lib/issueInvoice.js";
 
 const router = Router();
 
@@ -10,6 +12,17 @@ interface RazorpayPaymentEntity {
   id: string;
   order_id: string;
   status: string;
+  method?: string;
+  bank?: string;
+  vpa?: string;
+  card?: { network?: string; last4?: string };
+  acquirer_data?: { rrn?: string; auth_code?: string };
+  email?: string;
+  contact?: string;
+  fee?: number;
+  tax?: number;
+  amount?: number;
+  currency?: string;
 }
 
 interface RazorpayWebhookBody {
@@ -17,6 +30,35 @@ interface RazorpayWebhookBody {
   payload: {
     payment?: { entity: RazorpayPaymentEntity };
   };
+}
+
+function buildPaymentSnapshot(entity: RazorpayPaymentEntity): Record<string, unknown> {
+  return {
+    razorpay_payment_id: entity.id,
+    order_id: entity.order_id,
+    method: entity.method ?? null,
+    bank: entity.bank ?? null,
+    vpa: entity.vpa ?? null,
+    card_network: entity.card?.network ?? null,
+    card_last4: entity.card?.last4 ?? null,
+    rrn: entity.acquirer_data?.rrn ?? null,
+    auth_code: entity.acquirer_data?.auth_code ?? null,
+    email: entity.email ?? null,
+    contact: entity.contact ?? null,
+    fee: entity.fee ?? null,
+    tax: entity.tax ?? null,
+    amount: entity.amount ?? null,
+    currency: entity.currency ?? null,
+  };
+}
+
+async function enrichPaymentEntity(entity: RazorpayPaymentEntity): Promise<RazorpayPaymentEntity> {
+  try {
+    const fetched = (await razorpay.payments.fetch(entity.id)) as RazorpayPaymentEntity;
+    return { ...entity, ...fetched, id: entity.id, order_id: entity.order_id };
+  } catch {
+    return entity;
+  }
 }
 
 // Razorpay calls this directly — no user session, so it's authenticated by
@@ -70,7 +112,7 @@ router.post(
 
     const { data: payment, error: fetchError } = await supabaseAdmin
       .from("payments")
-      .select("id, user_id, status, credits_promised")
+      .select("id, user_id, status, credits_promised, pack_snapshot, taxable_value_minor, tax_minor")
       .eq("gateway", "razorpay")
       .eq("gateway_payment_id", paymentEntity.order_id)
       .maybeSingle();
@@ -86,7 +128,19 @@ router.post(
       if (payment.status !== "success") {
         await supabaseAdmin
           .from("payments")
-          .update({ status: "success", updated_at: new Date().toISOString() })
+          .update({
+            status: "success",
+            gateway_capture_id: paymentEntity.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", payment.id);
+      } else {
+        await supabaseAdmin
+          .from("payments")
+          .update({
+            gateway_capture_id: paymentEntity.id,
+            updated_at: new Date().toISOString(),
+          })
           .eq("id", payment.id);
       }
 
@@ -104,6 +158,31 @@ router.post(
       if (grantError) {
         req.log.error({ err: grantError }, "fn_grant_credits failed for captured payment");
         return res.status(500).send("grant failed");
+      }
+
+      // Invoice is best-effort AFTER credits. Failure must not fail the webhook.
+      const packSnapshot = payment.pack_snapshot as PackSnapshotRow | null;
+      if (packSnapshot && typeof packSnapshot.total_minor === "number") {
+        try {
+          const enriched = await enrichPaymentEntity(paymentEntity);
+          const result = await issueInvoiceForPayment({
+            paymentId: payment.id as string,
+            userId: payment.user_id as string,
+            packSnapshot,
+            paymentSnapshot: buildPaymentSnapshot(enriched),
+            buyerEmail: enriched.email ?? null,
+            log: req.log,
+          });
+          if ("skipped" in result) {
+            req.log.warn({ paymentId: payment.id, reason: result.reason }, "invoice not issued");
+          }
+        } catch (err) {
+          req.log.error({ err, paymentId: payment.id }, "invoice issuance threw after credit grant");
+        }
+      } else {
+        // Pre-invoicing payment rows (or in-flight checkouts from before deploy)
+        // still grant credits; invoices start for new checkouts that freeze pack_snapshot.
+        req.log.info({ paymentId: payment.id }, "skipping invoice — no pack_snapshot on payment");
       }
     } else if (body.event === "payment.failed") {
       if (payment.status !== "success") {

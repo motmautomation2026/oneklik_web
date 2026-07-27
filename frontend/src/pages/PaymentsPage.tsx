@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Badge, Button, ButtonGroup, Card, Col, Container, Row, Spinner, Table } from "react-bootstrap";
+import { Alert, Badge, Button, ButtonGroup, Card, Col, Container, Modal, Row, Spinner, Table } from "react-bootstrap";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/AuthProvider";
+import { apiGet, apiGetText } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
+import { formatMoney } from "../lib/formatMoney";
 
 type PaymentStatus = "initiated" | "pending" | "success" | "failed";
 
@@ -19,12 +21,16 @@ interface PaymentRow {
   updated_at: string;
 }
 
+interface InvoiceLookup {
+  payment_id: string;
+  id: string;
+  invoice_number: string;
+}
+
 type Filter = "all" | PaymentStatus;
 
 const PAGE_SIZE = 20;
 
-// Same mapping as the admin console (AdminTransactionsPage) so a given
-// status always reads as the same color everywhere in the product.
 const STATUS_VARIANT: Record<PaymentStatus, string> = {
   success: "success",
   pending: "warning",
@@ -32,9 +38,6 @@ const STATUS_VARIANT: Record<PaymentStatus, string> = {
   failed: "danger",
 };
 
-// "initiated" means checkout was started but never reached the gateway (or
-// the order call itself failed) — nothing a user would recognize as "a
-// payment", so it's labelled distinctly from a genuine gateway failure.
 const STATUS_LABEL: Record<PaymentStatus, string> = {
   success: "Success",
   pending: "Pending",
@@ -49,17 +52,6 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "failed", label: "Failed" },
 ];
 
-const inrFormatter = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 0,
-});
-
-function formatAmount(minorUnits: number, currency: string): string {
-  if (currency !== "INR") return `${(minorUnits / 100).toLocaleString()} ${currency}`;
-  return inrFormatter.format(minorUnits / 100);
-}
-
 export default function PaymentsPage() {
   const { user } = useAuth();
   const [rows, setRows] = useState<PaymentRow[]>([]);
@@ -68,10 +60,11 @@ export default function PaymentsPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [invoiceByPayment, setInvoiceByPayment] = useState<Record<string, InvoiceLookup>>({});
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ number: string; html: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Lifetime totals across *all* of the user's payments, independent of the
-  // current page/filter — a second, unfiltered query keeps this stable
-  // while the table below is paged and filtered.
   const [summary, setSummary] = useState<{ totalSpentMinorUnits: number; creditsPurchased: number; successCount: number } | null>(
     null,
   );
@@ -124,6 +117,24 @@ export default function PaymentsPage() {
       setHasNextPage(fetched.length > PAGE_SIZE);
       setRows(fetched.slice(0, PAGE_SIZE));
       setLoading(false);
+
+      const paymentIds = fetched.slice(0, PAGE_SIZE).map((r) => r.id);
+      if (paymentIds.length === 0) {
+        setInvoiceByPayment({});
+        return;
+      }
+      supabase
+        .from("invoices")
+        .select("id, payment_id, invoice_number")
+        .in("payment_id", paymentIds)
+        .then(({ data: invoices }) => {
+          if (!active) return;
+          const map: Record<string, InvoiceLookup> = {};
+          for (const inv of invoices ?? []) {
+            map[inv.payment_id as string] = inv as InvoiceLookup;
+          }
+          setInvoiceByPayment(map);
+        });
     });
 
     return () => {
@@ -135,6 +146,40 @@ export default function PaymentsPage() {
     const success = rows.find((r) => r.status === "success");
     return success?.created_at ?? null;
   }, [rows]);
+
+  async function viewReceipt(invoice: InvoiceLookup) {
+    setError(null);
+    setPreviewLoading(true);
+    setPreview(null);
+    try {
+      const html = await apiGetText(`/api/invoices/${invoice.id}/html`);
+      setPreview({ number: invoice.invoice_number, html });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load receipt");
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function downloadPdf(invoice: InvoiceLookup) {
+    setBusyId(invoice.id);
+    setError(null);
+    try {
+      const res = await apiGet<{ url: string; filename: string }>(`/api/invoices/${invoice.id}/pdf`);
+      const a = document.createElement("a");
+      a.href = res.url;
+      a.download = res.filename || `${invoice.invoice_number}.pdf`;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not download PDF");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <AppLayout>
@@ -161,7 +206,7 @@ export default function PaymentsPage() {
               <Card.Body>
                 <div className="text-body-secondary small">Total spent</div>
                 <div className="h4 mb-0">
-                  {summary ? inrFormatter.format(summary.totalSpentMinorUnits / 100) : <Spinner animation="border" size="sm" />}
+                  {summary ? formatMoney(summary.totalSpentMinorUnits, "INR") : <Spinner animation="border" size="sm" />}
                 </div>
               </Card.Body>
             </Card>
@@ -231,21 +276,52 @@ export default function PaymentsPage() {
                       <th className="text-end">Amount</th>
                       <th className="text-end">Credits</th>
                       <th>Status</th>
+                      <th>Receipt</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{new Date(row.created_at).toLocaleString()}</td>
-                        <td className="text-body-secondary small font-monospace">{row.gateway_payment_id ?? "—"}</td>
-                        <td className="text-capitalize">{row.gateway}</td>
-                        <td className="text-end">{formatAmount(row.amount_minor_units, row.currency)}</td>
-                        <td className="text-end">{row.credits_promised.toLocaleString()}</td>
-                        <td>
-                          <Badge bg={STATUS_VARIANT[row.status]}>{STATUS_LABEL[row.status]}</Badge>
-                        </td>
-                      </tr>
-                    ))}
+                    {rows.map((row) => {
+                      const invoice = invoiceByPayment[row.id];
+                      return (
+                        <tr key={row.id}>
+                          <td>{new Date(row.created_at).toLocaleString()}</td>
+                          <td className="text-body-secondary small font-monospace">{row.gateway_payment_id ?? "—"}</td>
+                          <td className="text-capitalize">{row.gateway}</td>
+                          <td className="text-end">{formatMoney(row.amount_minor_units, row.currency)}</td>
+                          <td className="text-end">{row.credits_promised.toLocaleString()}</td>
+                          <td>
+                            <Badge bg={STATUS_VARIANT[row.status]}>{STATUS_LABEL[row.status]}</Badge>
+                          </td>
+                          <td>
+                            {invoice ? (
+                              <div className="d-flex flex-wrap align-items-center gap-1">
+                                <span className="small font-monospace">{invoice.invoice_number}</span>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="px-1 py-0"
+                                  disabled={previewLoading}
+                                  onClick={() => viewReceipt(invoice)}
+                                >
+                                  View
+                                </Button>
+                                <Button
+                                  variant="link"
+                                  size="sm"
+                                  className="px-1 py-0"
+                                  disabled={busyId === invoice.id}
+                                  onClick={() => downloadPdf(invoice)}
+                                >
+                                  {busyId === invoice.id ? "…" : "PDF"}
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-body-secondary small">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </Table>
               </div>
@@ -267,6 +343,41 @@ export default function PaymentsPage() {
           </Card.Body>
         </Card>
       </Container>
+
+      <Modal show={previewLoading || preview !== null} onHide={() => setPreview(null)} size="xl" centered>
+        <Modal.Header closeButton>
+          <Modal.Title>{preview?.number ?? "Receipt"}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body className="p-0">
+          {previewLoading ? (
+            <div className="text-center py-5">
+              <Spinner animation="border" variant="primary" />
+            </div>
+          ) : preview ? (
+            <iframe
+              title={preview.number}
+              srcDoc={preview.html}
+              sandbox=""
+              style={{ width: "100%", minHeight: "80vh", border: 0, background: "#fff" }}
+            />
+          ) : null}
+        </Modal.Body>
+        {preview && (
+          <Modal.Footer>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={busyId !== null}
+              onClick={() => {
+                const inv = Object.values(invoiceByPayment).find((i) => i.invoice_number === preview.number);
+                if (inv) void downloadPdf(inv);
+              }}
+            >
+              Download PDF
+            </Button>
+          </Modal.Footer>
+        )}
+      </Modal>
     </AppLayout>
   );
 }

@@ -625,3 +625,163 @@ label.text-uppercase,
 .table-hover > tbody > tr:hover > * {
   background-color: var(--brand-50);
 }
+
+/* ── Support: raise-a-request form ────────────────────────────────────
+   The form is a reading-width column rather than a full-width sheet. A
+   field stretched across a desktop monitor puts its label a foot away
+   from the caret and makes a one-line subject look like it's meant to be
+   a paragraph, so the whole column is capped and centred instead. ───── */
+
+.ticket-form-page {
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.ticket-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--ink-dim);
+  text-decoration: none;
+}
+
+.ticket-back-link:hover {
+  color: var(--brand-600);
+}
+
+/* Label and counter share a baseline row, so the count sits with its own
+   field instead of drifting under the one below it. */
+.ticket-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+
+.ticket-field-head .form-label,
+.ticket-field-label {
+  margin-bottom: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ticket-counter {
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ticket-form-card > .card-body {
+  padding: 1.75rem;
+}
+
+.ticket-form .form-control,
+.ticket-form .form-select {
+  border-color: var(--line);
+  padding: 0.625rem 0.75rem;
+}
+
+.ticket-form textarea.form-control {
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.ticket-form .form-text {
+  margin-top: 0.375rem;
+}
+
+.ticket-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  width: 100%;
+  margin-bottom: 0;
+  padding: 1.25rem 1rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.5rem;
+  background: var(--brand-50);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.ticket-dropzone:hover {
+  border-color: var(--brand-300);
+  background: var(--brand-100);
+}
+
+.ticket-dropzone.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.ticket-dropzone.is-disabled:hover {
+  border-color: var(--line);
+  background: var(--brand-50);
+}
+
+.ticket-dropzone svg {
+  color: var(--brand-600);
+  margin-bottom: 0.15rem;
+}
+
+.ticket-dropzone-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--brand-700);
+}
+
+.ticket-dropzone-hint {
+  font-size: 0.75rem;
+  color: var(--ink-dim);
+}
+
+.ticket-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  padding: 0.35rem 0.35rem 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.8125rem;
+  color: var(--ink);
+}
+
+.ticket-file-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The action row is pulled to the card's edges so its rule reads as the
+   foot of the form, not a divider dropped inside the last field. */
+.ticket-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1.75rem -1.75rem -1.75rem;
+  padding: 1.25rem 1.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--brand-50);
+  border-radius: 0 0 0.375rem 0.375rem;
+}
+
+@media (max-width: 575.98px) {
+  .ticket-form-card > .card-body {
+    padding: 1.25rem;
+  }
+
+  .ticket-form-footer {
+    margin: 1.5rem -1.25rem -1.25rem;
+    padding: 1rem 1.25rem;
+  }
+}

@@ -1,8 +1,14 @@
-import { apiDownload, apiGet, apiPatch } from "../../lib/api";
+import { apiDownload, apiGet, apiPatch, apiPost } from "../../lib/api";
 import type {
   AccountStatus,
   AdminAccountRow,
   AdminOverview,
+  AdminTicketDetail,
+  PaginatedSupportTickets,
+  SupportKpis,
+  TicketCategory,
+  TicketPriority,
+  TicketStatus,
   CompanyRollupEntry,
   FeatureUsageResponse,
   FunnelStats,
@@ -182,4 +188,80 @@ export function fetchTopCompanies(limit = 10): Promise<{ companies: CompanyRollu
 
 export function fetchAdmins(): Promise<{ admins: AdminAccountRow[] }> {
   return apiGet<{ admins: AdminAccountRow[] }>("/api/admin/admins");
+}
+
+// ── support tickets ─────────────────────────────────────────────────────
+
+export interface FetchSupportTicketsParams {
+  page: number;
+  pageSize: number;
+  status?: TicketStatus;
+  category?: TicketCategory;
+  priority?: TicketPriority;
+  assignedTo?: string;
+  unassigned?: boolean;
+  unanswered?: boolean;
+  openOnly?: boolean;
+  search?: string;
+  signal?: AbortSignal;
+}
+
+function supportQuery(params: Omit<FetchSupportTicketsParams, "signal">): URLSearchParams {
+  const query = new URLSearchParams();
+  if (params.page) query.set("page", String(params.page));
+  if (params.pageSize) query.set("pageSize", String(params.pageSize));
+  if (params.status) query.set("status", params.status);
+  if (params.category) query.set("category", params.category);
+  if (params.priority) query.set("priority", params.priority);
+  if (params.assignedTo) query.set("assignedTo", params.assignedTo);
+  if (params.unassigned) query.set("unassigned", "1");
+  if (params.unanswered) query.set("unanswered", "1");
+  if (params.openOnly) query.set("openOnly", "1");
+  if (params.search) query.set("search", params.search);
+  return query;
+}
+
+export function fetchSupportTickets({ signal, ...params }: FetchSupportTicketsParams): Promise<PaginatedSupportTickets> {
+  return apiGet<PaginatedSupportTickets>(`/api/admin/support?${supportQuery(params).toString()}`, signal);
+}
+
+export function fetchSupportKpis(signal?: AbortSignal): Promise<SupportKpis> {
+  return apiGet<SupportKpis>("/api/admin/support/kpis", signal);
+}
+
+export function fetchSupportBadge(signal?: AbortSignal): Promise<{ count: number }> {
+  return apiGet<{ count: number }>("/api/admin/support/badge", signal);
+}
+
+export function fetchSupportTicket(id: string, signal?: AbortSignal): Promise<{ ticket: AdminTicketDetail }> {
+  return apiGet<{ ticket: AdminTicketDetail }>(`/api/admin/support/${id}`, signal);
+}
+
+export function postSupportMessage(id: string, body: string, internal: boolean): Promise<{ ok: true }> {
+  return apiPost<{ ok: true }>(`/api/admin/support/${id}/messages`, { body, internal });
+}
+
+export function patchSupportTicket(
+  id: string,
+  patch: { status?: TicketStatus; priority?: TicketPriority; assigned_to?: string | null },
+): Promise<{ ok: true }> {
+  return apiPatch<{ ok: true }>(`/api/admin/support/${id}`, patch);
+}
+
+export function markSupportTicketRead(id: string): Promise<{ ok: true }> {
+  return apiPost<{ ok: true }>(`/api/admin/support/${id}/read`, {});
+}
+
+export function setSupportMute(id: string, userId: string, until: string | null): Promise<{ ok: true; until: string | null }> {
+  return apiPost<{ ok: true; until: string | null }>(`/api/admin/support/${id}/mute`, { user_id: userId, until });
+}
+
+export function fetchSupportAttachmentUrl(attachmentId: string): Promise<{ url: string }> {
+  return apiGet<{ url: string }>(`/api/admin/support-attachments/${attachmentId}/url`);
+}
+
+export function exportSupportTicketsCsv(params: Omit<FetchSupportTicketsParams, "signal" | "page" | "pageSize">): Promise<void> {
+  const query = supportQuery({ ...params, page: 0, pageSize: 0 });
+  const qs = query.toString();
+  return apiDownload(`/api/admin/support/export${qs ? `?${qs}` : ""}`, "support-tickets.csv");
 }

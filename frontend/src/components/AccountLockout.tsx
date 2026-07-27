@@ -66,10 +66,10 @@ export default function AccountLockout({ status, reason, suspendedUntil }: Accou
           )}
 
           <p className="small text-body-secondary mb-4">
-            If you believe this is a mistake, please contact our support team
+            If you believe this is a mistake, raise a request and our team will review it
             {SUPPORT_EMAIL ? (
               <>
-                {" at "}
+                {". You can also email us at "}
                 <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
               </>
             ) : (
@@ -78,9 +78,20 @@ export default function AccountLockout({ status, reason, suspendedUntil }: Accou
             .
           </p>
 
-          <Button variant="outline-secondary" onClick={handleSignOut} disabled={signingOut}>
-            {signingOut ? "Signing out…" : "Sign out"}
-          </Button>
+          {/* The primary action on this screen. Reaching it works because the
+              /support routes pass allowLockedOut to RequireAuth — every other
+              route would bounce straight back to this page. */}
+          <div className="d-grid gap-2">
+            <Button variant="primary" onClick={() => navigate("/support/new?source=lockout")}>
+              Raise a request
+            </Button>
+            <Button variant="outline-secondary" onClick={() => navigate("/support")}>
+              View my requests
+            </Button>
+            <Button variant="link" className="text-body-secondary" onClick={handleSignOut} disabled={signingOut}>
+              {signingOut ? "Signing out…" : "Sign out"}
+            </Button>
+          </div>
         </Card.Body>
       </Card>
     </Container>

@@ -22,6 +22,24 @@ export const ACCOUNT_STATUS_VARIANT: Record<string, string> = {
   banned: "danger",
 };
 
+// Support ticket status. 'waiting_on_user' is deliberately muted — the ball is
+// in the customer's court, so it should not compete for attention with the
+// states the team still owns.
+export const TICKET_STATUS_VARIANT: Record<string, string> = {
+  open: "danger",
+  in_progress: "primary",
+  waiting_on_user: "secondary",
+  resolved: "success",
+  closed: "dark",
+};
+
+export const TICKET_PRIORITY_VARIANT: Record<string, string> = {
+  low: "secondary",
+  normal: "info",
+  high: "warning",
+  urgent: "danger",
+};
+
 export const LEDGER_TYPE_VARIANT: Record<string, string> = {
   purchase: "success",
   promo_grant: "success",

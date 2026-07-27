@@ -18,6 +18,9 @@ import BuyCreditsPage from "./pages/BuyCreditsPage";
 import ProfilePage from "./pages/ProfilePage";
 import WalletPage from "./pages/WalletPage";
 import PaymentsPage from "./pages/PaymentsPage";
+import SupportPage from "./pages/SupportPage";
+import NewTicketPage from "./pages/NewTicketPage";
+import SupportTicketPage from "./pages/SupportTicketPage";
 import RequireAdmin from "./admin/guards/RequireAdmin";
 import AdminShell from "./admin/layout/AdminShell";
 import AdminOverviewPage from "./admin/pages/AdminOverviewPage";
@@ -26,6 +29,8 @@ import AdminUserDetailPage from "./admin/pages/AdminUserDetailPage";
 import AdminTransactionsPage from "./admin/pages/AdminTransactionsPage";
 import AdminRunsPage from "./admin/pages/AdminRunsPage";
 import AdminListsPage from "./admin/pages/AdminListsPage";
+import AdminSupportPage from "./admin/pages/AdminSupportPage";
+import AdminSupportDetailPage from "./admin/pages/AdminSupportDetailPage";
 
 function App() {
   return (
@@ -125,6 +130,37 @@ function App() {
               </RequireAuth>
             }
           />
+          {/* Support is the one authenticated surface a suspended or banned
+              user can still reach — allowLockedOut is what lets them past the
+              lockout screen, and requireOnboarded is deliberately omitted so a
+              half-onboarded account can still ask for help. Static "/new" is
+              declared before "/:id"; React Router ranks static segments above
+              dynamic ones regardless of order, but keeping them in this order
+              matches how the Express routers read. */}
+          <Route
+            path="/support"
+            element={
+              <RequireAuth allowLockedOut>
+                <SupportPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/support/new"
+            element={
+              <RequireAuth allowLockedOut>
+                <NewTicketPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/support/:id"
+            element={
+              <RequireAuth allowLockedOut>
+                <SupportTicketPage />
+              </RequireAuth>
+            }
+          />
           <Route
             path="/admin"
             element={
@@ -145,6 +181,8 @@ function App() {
             <Route path="users/:id" element={<AdminUserDetailPage />} />
             <Route path="transactions" element={<AdminTransactionsPage />} />
             <Route path="runs" element={<AdminRunsPage />} />
+            <Route path="support" element={<AdminSupportPage />} />
+            <Route path="support/:id" element={<AdminSupportDetailPage />} />
             <Route path="lists" element={<AdminListsPage />} />
           </Route>
           <Route path="*" element={<RootRedirect />} />

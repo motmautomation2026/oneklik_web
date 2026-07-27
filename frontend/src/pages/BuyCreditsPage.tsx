@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Badge, Button, Card, Col, Container, Row, Spinner } from "react-bootstrap";
+import { CheckCircleFill } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import { apiGet, apiPost } from "../lib/api";
 
@@ -31,6 +32,22 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+const SALES_EMAIL = "rameshwarv.motm@gmail.com";
+
+const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
+  starter: { label: "Starter", bestFor: "Individual users" },
+  growth: { label: "Growth", bestFor: "Small teams" },
+  business: { label: "Business", bestFor: "Growing businesses" },
+};
+
+const PLAN_FEATURES = [
+  "Company & People Search",
+  "Verified Email & Phone Reveal",
+  "LinkedIn Lookup",
+  "AI-powered search",
+  "Save to Lists & export",
+  "Credits never expire",
+];
 
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -56,6 +73,18 @@ export default function BuyCreditsPage() {
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ credits: number } | null>(null);
+  const [emailCopied, setEmailCopied] = useState(false);
+
+  async function handleCopyEmail() {
+    try {
+      await navigator.clipboard.writeText(SALES_EMAIL);
+      setEmailCopied(true);
+      setTimeout(() => setEmailCopied(false), 2000);
+    } catch {
+      // Clipboard API can be unavailable (insecure context, permissions) —
+      // the email is already shown as plain text, so this is a nice-to-have.
+    }
+  }
 
   useEffect(() => {
     apiGet<{ packs: CreditPack[] }>("/api/payments/packs")
@@ -149,53 +178,87 @@ export default function BuyCreditsPage() {
           </div>
         ) : (
           <Row className="g-4">
-            {packs.map((pack) => (
-              <Col xs={12} md={4} key={pack.id}>
-                <Card className={`shadow-sm h-100 ${pack.comingSoon ? "opacity-75" : ""}`}>
+            {packs.map((pack) => {
+              const info = PLAN_INFO[pack.id];
+              return (
+              <Col xs={12} md={6} lg={3} key={pack.id}>
+                <Card className="shadow-sm h-100">
                   <Card.Body className="d-flex flex-column">
-                    {pack.comingSoon ? (
-                      <>
-                        <Badge bg="secondary" className="mb-3 align-self-start">
-                          Coming soon
-                        </Badge>
-                        <h2 className="h5">More pack sizes</h2>
-                        <p className="text-body-secondary small flex-grow-1">
-                          Additional credit packs will be available here soon.
-                        </p>
-                        <Button variant="outline-secondary" disabled className="w-100">
-                          Not available yet
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <h2 className="h5">{pack.credits.toLocaleString()} credits</h2>
-                        <p className="text-body-secondary small flex-grow-1">
-                          One-time purchase, added to your balance immediately after payment.
-                        </p>
-                        <div className="h3 mb-3">
-                          ₹{pack.priceInr.toLocaleString()}
-                        </div>
-                        <Button
-                          variant="primary"
-                          className="w-100"
-                          disabled={buyingPackId === pack.id || polling}
-                          onClick={() => handleBuy(pack)}
-                        >
-                          {buyingPackId === pack.id ? (
-                            <>
-                              <Spinner animation="border" size="sm" className="me-2" />
-                              Opening checkout…
-                            </>
-                          ) : (
-                            "Buy Now"
-                          )}
-                        </Button>
-                      </>
+                    {info && (
+                      <Badge bg="secondary" className="mb-3 align-self-start">
+                        {info.label}
+                      </Badge>
                     )}
+                    <h2 className="h5">{pack.credits.toLocaleString()} credits</h2>
+                    <p className="text-body-secondary small flex-grow-1">
+                      One-time purchase, added to your balance immediately after payment.
+                      {info && <> Best for {info.bestFor.toLowerCase()}.</>}
+                    </p>
+                    <div className="h3 mb-3">₹{pack.priceInr.toLocaleString()}</div>
+                    <ul className="list-unstyled small mb-3">
+                      {PLAN_FEATURES.map((feature) => (
+                        <li key={feature} className="d-flex align-items-center gap-2 mb-1">
+                          <CheckCircleFill className="text-primary flex-shrink-0" size={14} />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      variant="primary"
+                      className="w-100"
+                      disabled={buyingPackId === pack.id || polling}
+                      onClick={() => handleBuy(pack)}
+                    >
+                      {buyingPackId === pack.id ? (
+                        <>
+                          <Spinner animation="border" size="sm" className="me-2" />
+                          Opening checkout…
+                        </>
+                      ) : (
+                        "Buy Now"
+                      )}
+                    </Button>
                   </Card.Body>
                 </Card>
               </Col>
-            ))}
+              );
+            })}
+            <Col xs={12} md={6} lg={3}>
+              <Card className="shadow-sm h-100">
+                <Card.Body className="d-flex flex-column">
+                  <Badge bg="secondary" className="mb-3 align-self-start">
+                    Custom
+                  </Badge>
+                  <h2 className="h5">Enterprise</h2>
+                  <p className="text-body-secondary small flex-grow-1">
+                    Custom credit volume for large organizations. Get in touch to set up a plan.
+                  </p>
+                  <ul className="list-unstyled small mb-3">
+                    {[...PLAN_FEATURES, "Custom credit volume", "Priority support"].map((feature) => (
+                      <li key={feature} className="d-flex align-items-center gap-2 mb-1">
+                        <CheckCircleFill className="text-primary flex-shrink-0" size={14} />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <Button
+                    variant="outline-primary"
+                    className="w-100"
+                    href={`mailto:${SALES_EMAIL}?subject=One-Klik%20Enterprise%20plan`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Contact Sales
+                  </Button>
+                  <div className="d-flex align-items-center justify-content-center gap-2 mt-2">
+                    <span className="text-body-secondary small">{SALES_EMAIL}</span>
+                    <Button variant="link" size="sm" className="p-0" onClick={handleCopyEmail}>
+                      {emailCopied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </Card.Body>
+              </Card>
+            </Col>
           </Row>
         )}
       </Container>

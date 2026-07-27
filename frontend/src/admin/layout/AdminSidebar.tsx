@@ -1,21 +1,32 @@
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   Activity,
   ChevronDoubleLeft,
   ChevronDoubleRight,
+  LifePreserver,
   PeopleFill,
   Receipt,
   Speedometer2,
   X,
 } from "react-bootstrap-icons";
+import { fetchSupportBadge } from "../api/adminApi";
 
 interface AdminNavItem {
   to: string;
   label: string;
   icon: ComponentType<{ size?: number }>;
   end?: boolean;
+  // Only Support sets this. A queue item nobody has answered is the one thing
+  // in this console that gets worse the longer it goes unseen, so it is the
+  // one nav item that earns a count.
+  badge?: boolean;
 }
+
+// Polling, not realtime. The count only has to be roughly current — a minute
+// of staleness on a support queue costs nothing, and a Supabase realtime
+// subscription would be a new dependency and a new socket for one integer.
+const BADGE_POLL_MS = 60_000;
 
 // Deliberately not derived from or shared with the product Sidebar
 // (components/Sidebar.tsx). The admin console is a different surface with a
@@ -31,6 +42,7 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: "/admin/users", label: "Users", icon: PeopleFill },
   { to: "/admin/transactions", label: "Transactions", icon: Receipt },
   { to: "/admin/runs", label: "Runs", icon: Activity },
+  { to: "/admin/support", label: "Support", icon: LifePreserver, badge: true },
 ];
 
 const STORAGE_KEY = "one-klik-admin-sidebar-collapsed";
@@ -43,6 +55,32 @@ interface AdminSidebarProps {
 export default function AdminSidebar({ mobileOpen, onClose }: AdminSidebarProps) {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(STORAGE_KEY) === "1");
+  const [supportCount, setSupportCount] = useState(0);
+
+  // Refetches on navigation as well as on the interval, so answering a ticket
+  // updates the badge immediately rather than up to a minute later.
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    const load = () => {
+      fetchSupportBadge(controller.signal)
+        .then((res) => {
+          if (active) setSupportCount(res.count);
+        })
+        // Silent: a failed badge poll must never surface an error banner over
+        // the console. The count simply keeps its previous value.
+        .catch(() => undefined);
+    };
+
+    load();
+    const timer = setInterval(load, BADGE_POLL_MS);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [location.pathname]);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -92,6 +130,11 @@ export default function AdminSidebar({ mobileOpen, onClose }: AdminSidebarProps)
               >
                 <Icon size={18} />
                 <span className="app-sidebar-link-label">{item.label}</span>
+                {item.badge && supportCount > 0 && (
+                  <span className="app-sidebar-badge" title={`${supportCount} awaiting a reply`}>
+                    {supportCount > 99 ? "99+" : supportCount}
+                  </span>
+                )}
               </Link>
             );
           })}

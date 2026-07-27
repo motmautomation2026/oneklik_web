@@ -219,7 +219,138 @@ export interface SetUserStatusResponse {
   ok: true;
   previous_status: AccountStatus;
   new_status: AccountStatus;
-  auth_layer_applied: boolean;
+}
+
+// ── support tickets ─────────────────────────────────────────────────────
+// Mirrors backend/src/support/types.ts and admin/supportQueries.ts. Kept as a
+// hand-written copy rather than a shared package because the two halves of
+// this repo already duplicate every other wire type the same way.
+
+export type TicketStatus = "open" | "in_progress" | "waiting_on_user" | "resolved" | "closed";
+export type TicketPriority = "low" | "normal" | "high" | "urgent";
+export type TicketSource = "app" | "lockout" | "admin";
+export type TicketMessageRole = "user" | "admin" | "system";
+export type TicketCategory =
+  | "billing"
+  | "credits"
+  | "data_quality"
+  | "account_access"
+  | "bug"
+  | "feature_request"
+  | "other";
+
+export const TICKET_STATUSES: TicketStatus[] = ["open", "in_progress", "waiting_on_user", "resolved", "closed"];
+export const TICKET_PRIORITIES: TicketPriority[] = ["low", "normal", "high", "urgent"];
+export const TICKET_CATEGORIES: TicketCategory[] = [
+  "billing",
+  "credits",
+  "data_quality",
+  "account_access",
+  "bug",
+  "feature_request",
+  "other",
+];
+
+export const TICKET_CATEGORY_LABEL: Record<TicketCategory, string> = {
+  billing: "Billing & payments",
+  credits: "Credits & refunds",
+  data_quality: "Data quality",
+  account_access: "Account access & appeals",
+  bug: "Bug report",
+  feature_request: "Feature request",
+  other: "Other",
+};
+
+export const TICKET_STATUS_LABEL: Record<TicketStatus, string> = {
+  open: "Open",
+  in_progress: "In progress",
+  waiting_on_user: "Waiting on user",
+  resolved: "Resolved",
+  closed: "Closed",
+};
+
+export interface TicketAttachment {
+  id: string;
+  filename: string;
+  mime: string;
+  size_bytes: number;
+}
+
+export interface AdminTicketRow {
+  id: string;
+  ticket_number: number;
+  user_id: string;
+  email: string | null;
+  category: TicketCategory;
+  subject: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  source: TicketSource;
+  assigned_to: string | null;
+  assigned_to_email: string | null;
+  account_status_at_submit: AccountStatus;
+  created_at: string;
+  last_message_at: string;
+  last_message_role: TicketMessageRole;
+  first_response_at: string | null;
+  awaiting_reply: boolean;
+  admin_unread: boolean;
+}
+
+export interface AdminTicketMessage {
+  id: string;
+  author_id: string | null;
+  author_role: TicketMessageRole;
+  author_email: string | null;
+  body: string;
+  is_internal: boolean;
+  created_at: string;
+  attachments: TicketAttachment[];
+}
+
+export interface AdminTicketEvent {
+  id: string;
+  actor_role: string;
+  actor_email: string | null;
+  event_type: string;
+  from_value: string | null;
+  to_value: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface AdminTicketDetail extends AdminTicketRow {
+  related_ticket_id: string | null;
+  context_ref_type: string | null;
+  context_ref_id: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  requester: {
+    account_status: AccountStatus;
+    suspended_until: string | null;
+    status_reason: string | null;
+    support_muted_until: string | null;
+    company: string | null;
+    available_balance: number;
+    other_ticket_count: number;
+  };
+  messages: AdminTicketMessage[];
+  events: AdminTicketEvent[];
+}
+
+export interface SupportKpis {
+  open: number;
+  unassigned: number;
+  awaiting_reply: number;
+  resolved_this_week: number;
+  median_first_response_minutes: number | null;
+}
+
+export interface PaginatedSupportTickets {
+  rows: AdminTicketRow[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface RunRow {

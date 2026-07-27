@@ -898,7 +898,7 @@ export async function reviewFlaggedAccount(
 
 export type SetUserStatusResult =
   | { ok: false; reason: "not_found" | "target_is_admin" }
-  | { ok: true; previous_status: AccountStatus; new_status: AccountStatus; auth_layer_applied: boolean };
+  | { ok: true; previous_status: AccountStatus; new_status: AccountStatus };
 
 const ACTION_TO_STATUS: Record<ModerationAction, AccountStatus> = {
   freeze: "frozen",
@@ -907,23 +907,28 @@ const ACTION_TO_STATUS: Record<ModerationAction, AccountStatus> = {
   reactivate: "active",
 };
 
-// GoTrue's ban_duration accepts units only up to hours, so a "permanent" ban
-// is expressed as a very long horizon (~100 years); "none" lifts it.
-const PERMANENT_BAN_DURATION = "876000h";
-
 // The single path for changing a user's moderation status. Ordering is
 // deliberate:
 //   1. read current status + is_admin  (existence check, admin guard, and the
 //      previous_status recorded in the audit row)
-//   2. update profiles                 (the source of truth the app-layer
-//      enforceAccountStatus gate reads on every request)
+//   2. update profiles                 (the source of truth every enforcement
+//      layer reads)
 //   3. write the audit row
-//   4. apply the GoTrue ban / unban    (best-effort auth-layer hardening)
-// Steps 2-3 are the authoritative outcome; a 'banned' status is fully
-// enforced by the app-layer gate even with no GoTrue call at all, so if step
-// 4 fails we deliberately do NOT roll the status back — we return
-// auth_layer_applied:false so the route can log it and an admin can retry the
-// idempotent action to complete the auth-layer kill.
+//
+// NO AUTH-LAYER BAN. Until migration 0009 this function also called GoTrue's
+// admin.updateUserById({ ban_duration }) so a banned user could not sign in at
+// all. That was removed deliberately: a banned user must be able to log in to
+// reach the support system and appeal, which is impossible if authentication
+// itself is refused.
+//
+// Ban is not weaker for it, it moved down a layer. 'banned' is now enforced by
+//   - enforceAccountStatus on every product API route, and
+//   - the account_can_write() RESTRICTIVE policies from 0009, which block the
+//     direct browser-to-Postgres writes to lists/list_items that never touch
+//     Express at all.
+// The second of those is strictly better coverage than the GoTrue ban ever
+// gave us: it applies to a path the middleware could not see, and it is
+// permanent rather than lapsing when a token happens to expire.
 export async function setUserAccountStatus(params: {
   userId: string;
   action: ModerationAction;
@@ -971,21 +976,7 @@ export async function setUserAccountStatus(params: {
   });
   if (auditError) throw auditError;
 
-  // Auth-layer effects are keyed on the status transition, not the action
-  // name: entering 'banned' applies the GoTrue ban, and leaving 'banned' for
-  // ANY other status (active/frozen/suspended) must lift it — otherwise a
-  // banned -> frozen change would leave the user locked out of authentication
-  // while the app-level status claims they only have a soft freeze.
-  let authLayerApplied = true;
-  if (newStatus === "banned") {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: PERMANENT_BAN_DURATION });
-    if (error) authLayerApplied = false;
-  } else if (previousStatus === "banned") {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: "none" });
-    if (error) authLayerApplied = false;
-  }
-
-  return { ok: true, previous_status: previousStatus, new_status: newStatus, auth_layer_applied: authLayerApplied };
+  return { ok: true, previous_status: previousStatus, new_status: newStatus };
 }
 
 // ── v4: runs monitor, lists browser, company rollup, admins ──

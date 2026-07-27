@@ -419,6 +419,43 @@ label.text-uppercase,
   color: #fff;
 }
 
+/* Support queue count. Pushed to the far edge of the link so it reads as an
+   annotation on the row rather than part of the label. */
+.app-sidebar-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #dc3545;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* Collapsed to an icon rail there is no room for a count, so it degrades to a
+   dot pinned to the icon — still visibly "something is waiting", without
+   overflowing the
+   rail or being mistaken for a label. */
+@media (min-width: 768px) {
+  .app-sidebar.collapsed .app-sidebar-badge {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    min-width: 8px;
+    height: 8px;
+    padding: 0;
+    font-size: 0;
+    line-height: 0;
+    overflow: hidden;
+  }
+
+  .app-sidebar.collapsed .app-sidebar-link {
+    position: relative;
+  }
+}
+
 /* Mobile: the sidebar becomes a slide-in overlay drawer instead of a
    permanently visible column — even the icon-only collapsed rail would eat
    too much of a phone's width to stay always-on. */

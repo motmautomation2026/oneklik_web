@@ -26,6 +26,30 @@ import {
   reviewFlaggedAccount,
   setUserAccountStatus,
 } from "./queries.js";
+import {
+  addAdminMessage,
+  ExportTooLargeError,
+  MAX_EXPORT_ROWS,
+  getAdminAttachmentUrl,
+  getSupportBadgeCount,
+  getSupportKpis,
+  getSupportTicketDetail,
+  getSupportTickets,
+  getSupportTicketsForExport,
+  markTicketReadByAdmin,
+  setSupportMute,
+  updateSupportTicket,
+  type AdminTicketRow,
+} from "./supportQueries.js";
+import {
+  MAX_BODY_LENGTH,
+  TICKET_CATEGORIES,
+  TICKET_PRIORITIES,
+  TICKET_STATUSES,
+  type TicketCategory,
+  type TicketPriority,
+  type TicketStatus,
+} from "../support/types.js";
 import type { AccountStatus, FlaggedStatus, ModerationAction, PaymentRow, PaymentStatus, RunStatus } from "./types.js";
 
 const router = Router();
@@ -370,18 +394,10 @@ router.patch("/users/:id/status", async (req: Request, res: Response) => {
       return res.status(403).json({ error: "You can't change another admin's account status" });
     }
 
-    if (!result.auth_layer_applied) {
-      req.log.error(
-        { targetId, action },
-        "admin: account status updated but GoTrue auth-layer update failed — retry to complete the ban/unban",
-      );
-    }
-
     return res.json({
       ok: true,
       previous_status: result.previous_status,
       new_status: result.new_status,
-      auth_layer_applied: result.auth_layer_applied,
     });
   } catch (err) {
     req.log.error({ err }, "admin: failed to change user status");
@@ -433,6 +449,235 @@ router.get("/transactions", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "admin: failed to load transactions");
     return res.status(500).json({ error: "Could not load transactions" });
+  }
+});
+
+// ── support tickets ─────────────────────────────────────────────────────
+// Ordering note, same hazard as /users/kpis and /users/export above: every
+// literal path segment must be registered before /support/:id, or Express
+// matches it as an :id. The attachment route is deliberately mounted at
+// /support-attachments rather than /support/attachments so it cannot collide
+// with a ticket id at all.
+
+function ticketStatusParam(value: unknown): TicketStatus | undefined {
+  return typeof value === "string" && (TICKET_STATUSES as string[]).includes(value) ? (value as TicketStatus) : undefined;
+}
+
+function ticketCategoryParam(value: unknown): TicketCategory | undefined {
+  return typeof value === "string" && (TICKET_CATEGORIES as string[]).includes(value)
+    ? (value as TicketCategory)
+    : undefined;
+}
+
+function ticketPriorityParam(value: unknown): TicketPriority | undefined {
+  return typeof value === "string" && (TICKET_PRIORITIES as string[]).includes(value)
+    ? (value as TicketPriority)
+    : undefined;
+}
+
+function boolParam(value: unknown): boolean {
+  return value === "1" || value === "true";
+}
+
+function supportFiltersFromQuery(query: Record<string, unknown>) {
+  return {
+    status: ticketStatusParam(query.status),
+    category: ticketCategoryParam(query.category),
+    priority: ticketPriorityParam(query.priority),
+    assignedTo: stringParam(query.assignedTo),
+    unassignedOnly: boolParam(query.unassigned),
+    unansweredOnly: boolParam(query.unanswered),
+    openOnly: boolParam(query.openOnly),
+    search: stringParam(query.search),
+  };
+}
+
+router.get("/support/kpis", async (req: Request, res: Response) => {
+  try {
+    return res.json(await getSupportKpis());
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load support KPIs");
+    return res.status(500).json({ error: "Could not load support KPIs" });
+  }
+});
+
+// Drives the sidebar badge — polled, so kept as cheap as a single count.
+router.get("/support/badge", async (req: Request, res: Response) => {
+  try {
+    return res.json({ count: await getSupportBadgeCount() });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load support badge count");
+    return res.status(500).json({ error: "Could not load support badge count" });
+  }
+});
+
+router.get("/support/export", async (req: Request, res: Response) => {
+  try {
+    const rows = await getSupportTicketsForExport(supportFiltersFromQuery(req.query as Record<string, unknown>));
+    const csv = rowsToCsv<AdminTicketRow>(
+      [
+        { header: "Ticket", value: (r) => `#${r.ticket_number}` },
+        { header: "Subject", value: (r) => r.subject },
+        { header: "Requester", value: (r) => r.email ?? r.user_id },
+        { header: "Category", value: (r) => r.category },
+        { header: "Status", value: (r) => r.status },
+        { header: "Priority", value: (r) => r.priority },
+        { header: "Assignee", value: (r) => r.assigned_to_email ?? "" },
+        { header: "Account status at submit", value: (r) => r.account_status_at_submit },
+        { header: "Source", value: (r) => r.source },
+        { header: "Created", value: (r) => r.created_at },
+        { header: "Last activity", value: (r) => r.last_message_at },
+        { header: "First response", value: (r) => r.first_response_at ?? "" },
+        { header: "Awaiting reply", value: (r) => (r.awaiting_reply ? "Yes" : "No") },
+      ],
+      rows,
+    );
+    return sendCsv(res, "support-tickets.csv", csv);
+  } catch (err) {
+    // Refusing is deliberate — a silently truncated CSV looks complete.
+    if (err instanceof ExportTooLargeError) {
+      return res.status(413).json({
+        error: `That's ${err.total.toLocaleString()} tickets, more than the ${MAX_EXPORT_ROWS.toLocaleString()} this export supports. Narrow the filters (a status, a date-bounded search, or one assignee) and try again.`,
+      });
+    }
+    req.log.error({ err }, "admin: failed to export support tickets");
+    return res.status(500).json({ error: "Could not export support tickets" });
+  }
+});
+
+router.get("/support-attachments/:id/url", async (req: Request, res: Response) => {
+  try {
+    const url = await getAdminAttachmentUrl(req.params.id);
+    if (!url) return res.status(404).json({ error: "Attachment not found" });
+    return res.json({ url });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to sign support attachment url");
+    return res.status(500).json({ error: "Could not open the attachment" });
+  }
+});
+
+router.get("/support", async (req: Request, res: Response) => {
+  const page = clampInt(req.query.page, 1, 1, 100_000);
+  const pageSize = clampInt(req.query.pageSize, 25, 1, 100);
+  try {
+    const result = await getSupportTickets({
+      page,
+      pageSize,
+      ...supportFiltersFromQuery(req.query as Record<string, unknown>),
+    });
+    return res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load support tickets");
+    return res.status(500).json({ error: "Could not load support tickets" });
+  }
+});
+
+router.get("/support/:id", async (req: Request, res: Response) => {
+  try {
+    const ticket = await getSupportTicketDetail(req.params.id);
+    if (!ticket) return res.status(404).json({ error: "Ticket not found" });
+    return res.json({ ticket });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load support ticket");
+    return res.status(500).json({ error: "Could not load the ticket" });
+  }
+});
+
+// The internal/public distinction is carried explicitly as a boolean and is
+// never inferred. `internal: true` is only honored when it arrives as a real
+// boolean, so a malformed or missing field fails toward the safe outcome of a
+// note the customer would have seen anyway — never the reverse.
+router.post("/support/:id/messages", async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as { body?: string; internal?: boolean };
+  const text = typeof body.body === "string" ? body.body.trim() : "";
+  if (!text) return res.status(400).json({ error: "A message is required" });
+  if (text.length > MAX_BODY_LENGTH) {
+    return res.status(400).json({ error: `Message must be ${MAX_BODY_LENGTH} characters or fewer` });
+  }
+  if (body.internal !== undefined && typeof body.internal !== "boolean") {
+    return res.status(400).json({ error: "internal must be a boolean" });
+  }
+
+  try {
+    const ok = await addAdminMessage({
+      ticketId: req.params.id,
+      adminId: req.user!.id,
+      body: text,
+      isInternal: body.internal === true,
+    });
+    if (!ok) return res.status(404).json({ error: "Ticket not found" });
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to post support message");
+    return res.status(500).json({ error: "Could not post the message" });
+  }
+});
+
+router.patch("/support/:id", async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as { status?: string; priority?: string; assigned_to?: string | null };
+
+  if (body.status !== undefined && !ticketStatusParam(body.status)) {
+    return res.status(400).json({ error: `status must be one of: ${TICKET_STATUSES.join(", ")}` });
+  }
+  if (body.priority !== undefined && !ticketPriorityParam(body.priority)) {
+    return res.status(400).json({ error: `priority must be one of: ${TICKET_PRIORITIES.join(", ")}` });
+  }
+  if (body.assigned_to !== undefined && body.assigned_to !== null && typeof body.assigned_to !== "string") {
+    return res.status(400).json({ error: "assigned_to must be a user id or null" });
+  }
+
+  try {
+    const ok = await updateSupportTicket({
+      ticketId: req.params.id,
+      adminId: req.user!.id,
+      status: ticketStatusParam(body.status),
+      priority: ticketPriorityParam(body.priority),
+      assignedTo: body.assigned_to,
+    });
+    if (!ok) return res.status(404).json({ error: "Ticket not found" });
+    return res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to update support ticket");
+    return res.status(500).json({ error: "Could not update the ticket" });
+  }
+});
+
+router.post("/support/:id/read", async (req: Request, res: Response) => {
+  try {
+    await markTicketReadByAdmin(req.params.id);
+    return res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to mark support ticket read");
+    return res.status(500).json({ error: "Could not update the ticket" });
+  }
+});
+
+// Mute is time-boxed on purpose: `until: null` lifts it, a timestamp sets it.
+// An indefinite mute would silently strand a user with no way to reach us.
+router.post("/support/:id/mute", async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as { user_id?: string; until?: string | null };
+  if (typeof body.user_id !== "string" || !body.user_id) {
+    return res.status(400).json({ error: "user_id is required" });
+  }
+  if (body.user_id === req.user!.id) {
+    return res.status(400).json({ error: "You can't mute your own account" });
+  }
+
+  let until: string | null = null;
+  if (body.until != null && body.until !== "") {
+    const parsed = new Date(body.until);
+    if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: "until must be a valid date" });
+    if (parsed.getTime() <= Date.now()) return res.status(400).json({ error: "until must be a future date" });
+    until = parsed.toISOString();
+  }
+
+  try {
+    const ok = await setSupportMute({ ticketId: req.params.id, userId: body.user_id, adminId: req.user!.id, until });
+    if (!ok) return res.status(403).json({ error: "That account can't be muted" });
+    return res.json({ ok: true, until });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to set support mute");
+    return res.status(500).json({ error: "Could not update the mute" });
   }
 });
 

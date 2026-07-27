@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Badge, Button, Form, Modal } from "react-bootstrap";
+import { Badge, Button, Form, Modal } from "react-bootstrap";
 import { setUserStatus } from "../api/adminApi";
 import { ACCOUNT_STATUS_VARIANT } from "../badgeVariants";
 import { formatDateTime } from "../format";
@@ -71,7 +71,6 @@ export default function ModerationPanel({ user, statusReason, moderationActions,
   const [until, setUntil] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
 
   // Offer every transition that would actually change the current status.
   const availableActions = (Object.keys(ACTION_TO_STATUS) as ModerationAction[]).filter(
@@ -115,17 +114,12 @@ export default function ModerationPanel({ user, statusReason, moderationActions,
     setSubmitting(true);
     setError(null);
     try {
-      const result = await setUserStatus(user.user_id, {
+      await setUserStatus(user.user_id, {
         action: pendingAction,
         reason: trimmedReason || undefined,
         until: untilIso,
       });
       setPendingAction(null);
-      setWarning(
-        result.auth_layer_applied
-          ? null
-          : "Status was updated, but the authentication-layer ban/unban didn't apply. Run the same action again to retry the hard lockout.",
-      );
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update account status.");
@@ -188,12 +182,6 @@ export default function ModerationPanel({ user, statusReason, moderationActions,
               <div className="small mb-3" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
                 Reason: {statusReason}
               </div>
-            )}
-
-            {warning && (
-              <Alert variant="warning" className="py-2 small" dismissible onClose={() => setWarning(null)}>
-                {warning}
-              </Alert>
             )}
 
             <div className="d-flex flex-wrap gap-2">

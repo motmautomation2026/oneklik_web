@@ -8,9 +8,14 @@ import AccountLockout from "./AccountLockout";
 export default function RequireAuth({
   children,
   requireOnboarded = false,
+  allowLockedOut = false,
 }: {
   children: ReactNode;
   requireOnboarded?: boolean;
+  // Opt-in, used only by the /support routes. Defaults to false so every
+  // existing call site keeps exactly the behavior it had before support
+  // existed — a locked-out user still sees the lockout screen everywhere else.
+  allowLockedOut?: boolean;
 }) {
   const { session, user, profile, loading } = useAuth();
 
@@ -32,7 +37,10 @@ export default function RequireAuth({
   // time-boxed suspension is not a lockout (isLockedOut mirrors the backend's
   // lazy-expiry). Enforcement is server-side regardless; this is the
   // user-facing counterpart.
-  if (profile && isLockedOut(profile.account_status, profile.suspended_until)) {
+  // The support routes pass allowLockedOut, and deliberately never pass
+  // requireOnboarded either: a user who never finished onboarding, or who was
+  // restricted midway through it, must still be able to ask us why.
+  if (!allowLockedOut && profile && isLockedOut(profile.account_status, profile.suspended_until)) {
     return (
       <AccountLockout
         status={profile.account_status === "banned" ? "banned" : "suspended"}

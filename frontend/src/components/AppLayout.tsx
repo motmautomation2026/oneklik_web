@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Badge, Dropdown, Popover, ProgressBar, Spinner } from "react-bootstrap";
-import { ChevronDown, List, Wallet2 } from "react-bootstrap-icons";
+import { ChevronDown, Headset, List, Wallet2 } from "react-bootstrap-icons";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
+import { fetchUnreadCount } from "../lib/supportApi";
 import Sidebar from "./Sidebar";
 
 function initialsFromEmail(email: string | null | undefined): string {
@@ -21,6 +22,11 @@ interface Wallet {
 
 const LOW_BALANCE_THRESHOLD = 10;
 
+// Same reasoning as the admin sidebar badge: a support reply the user hasn't
+// seen only has to be roughly current, and polling one integer is cheaper than
+// holding open a realtime subscription for it.
+const SUPPORT_POLL_MS = 60_000;
+
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
@@ -28,6 +34,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [walletOpen, setWalletOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportUnread, setSupportUnread] = useState(0);
+  const supportCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const userMenuCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const walletCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -84,12 +93,50 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     walletCloseTimer.current = setTimeout(() => setWalletOpen(false), 150);
   }
 
+  function openSupport() {
+    if (supportCloseTimer.current) {
+      clearTimeout(supportCloseTimer.current);
+      supportCloseTimer.current = null;
+    }
+    setSupportOpen(true);
+  }
+
+  function scheduleCloseSupport() {
+    supportCloseTimer.current = setTimeout(() => setSupportOpen(false), 150);
+  }
+
   useEffect(() => {
     return () => {
       if (userMenuCloseTimer.current) clearTimeout(userMenuCloseTimer.current);
       if (walletCloseTimer.current) clearTimeout(walletCloseTimer.current);
+      if (supportCloseTimer.current) clearTimeout(supportCloseTimer.current);
     };
   }, []);
+
+  // Unread support replies. Failures are swallowed on purpose — a support
+  // badge is not worth an error banner over the whole app, and the count just
+  // keeps its last value.
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const controller = new AbortController();
+
+    const load = () => {
+      fetchUnreadCount(controller.signal)
+        .then((res) => {
+          if (active) setSupportUnread(res.unread);
+        })
+        .catch(() => undefined);
+    };
+
+    load();
+    const timer = setInterval(load, SUPPORT_POLL_MS);
+    return () => {
+      active = false;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [user]);
 
   const lowBalance = wallet !== null && wallet.available_balance < LOW_BALANCE_THRESHOLD;
 
@@ -165,6 +212,79 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
               <span className="app-topbar-divider" />
 
+              {/* Third topbar icon, alongside wallet and profile. Reuses the
+                  wallet's hover-popover pattern so the three behave
+                  identically. */}
+              <div className="app-wallet-anchor">
+                <button
+                  type="button"
+                  className="app-topbar-icon-btn position-relative"
+                  onClick={() => navigate("/support")}
+                  onMouseEnter={openSupport}
+                  onMouseLeave={scheduleCloseSupport}
+                  onFocus={openSupport}
+                  onBlur={scheduleCloseSupport}
+                  aria-label={
+                    supportUnread > 0
+                      ? `Support — ${supportUnread} new ${supportUnread === 1 ? "reply" : "replies"}`
+                      : "Support"
+                  }
+                  title="Support"
+                >
+                  <Headset size={18} />
+                  {supportUnread > 0 && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        background: "#dc3545",
+                      }}
+                    />
+                  )}
+                </button>
+                {supportOpen && (
+                  <Popover
+                    id="support-popover"
+                    className="app-wallet-popover"
+                    onMouseEnter={openSupport}
+                    onMouseLeave={scheduleCloseSupport}
+                  >
+                    <Popover.Body>
+                      <div className="small mb-2">
+                        {supportUnread > 0 ? (
+                          <span className="fw-semibold">
+                            {supportUnread} request{supportUnread === 1 ? " has" : "s have"} a new reply
+                          </span>
+                        ) : (
+                          <span className="text-body-secondary">Need a hand? We'll reply in the app.</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm w-100 mb-2"
+                        onClick={() => navigate("/support/new")}
+                      >
+                        Raise a request
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm w-100"
+                        onClick={() => navigate("/support")}
+                      >
+                        My requests
+                      </button>
+                    </Popover.Body>
+                  </Popover>
+                )}
+              </div>
+
+              <span className="app-topbar-divider" />
+
               <Dropdown
                 align="end"
                 show={userMenuOpen}
@@ -190,8 +310,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <Alert variant="warning" className="mb-0 rounded-0 border-0 border-bottom py-2 px-3 small">
             <span className="fw-semibold">Your account is frozen.</span> You can view your existing data, but spending
             credits — searches, reveals, and purchases — is paused.
-            {profile.status_reason ? ` Reason: ${profile.status_reason}.` : ""} Contact support if you think this is a
-            mistake.
+            {profile.status_reason ? ` Reason: ${profile.status_reason}.` : ""}{" "}
+            <button
+              type="button"
+              className="btn btn-link btn-sm p-0 align-baseline"
+              onClick={() => navigate("/support/new")}
+            >
+              Raise a request
+            </button>{" "}
+            if you think this is a mistake.
           </Alert>
         )}
         <div className="flex-grow-1 bg-light">{children}</div>

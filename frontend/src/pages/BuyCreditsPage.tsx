@@ -32,7 +32,7 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
-const SALES_EMAIL = "rameshwarv.motm@gmail.com";
+const SALES_EMAIL = "sales@oneklik.com";
 
 const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
   starter: { label: "Starter", bestFor: "Individual users" },

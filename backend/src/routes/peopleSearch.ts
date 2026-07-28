@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizePerson, type Person } from "../lib/revealFlow.js";
+import { ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.post("/hv/people-search", requireAuth, enforceAccountStatus(), async (req
   const maxTotal = Math.min(domains.length * countPerCompany, MAX_TOTAL_PEOPLE);
 
   const userId = req.user!.id;
+  await ensureSubscriptionCreditState(userId, req.log);
   const creditsNeeded = Math.ceil(maxTotal / 25);
 
   const { data: run, error: runError } = await supabaseAdmin

@@ -5,6 +5,8 @@ import crypto from "node:crypto";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { razorpay } from "../lib/razorpay.js";
 import { issueInvoiceForPayment, type PackSnapshotRow } from "../lib/issueInvoice.js";
+import { completeSubscriptionPayment } from "../lib/ensureSubscription.js";
+import { markProformaPaidForPeriod } from "../lib/issueProforma.js";
 
 const router = Router();
 
@@ -61,11 +63,6 @@ async function enrichPaymentEntity(entity: RazorpayPaymentEntity): Promise<Razor
   }
 }
 
-// Razorpay calls this directly — no user session, so it's authenticated by
-// verifying the HMAC signature instead of requireAuth. That verification
-// needs the *exact raw bytes* Razorpay signed, which is why this route uses
-// express.raw() instead of the app-wide express.json() (JSON-parsing first
-// would lose the original byte sequence the signature was computed over).
 router.post(
   "/payments/razorpay-webhook",
   express.raw({ type: "application/json" }),
@@ -85,8 +82,6 @@ router.post(
 
     const expectedSignature = crypto.createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
 
-    // Constant-time compare — a plain === check on a signature is itself a
-    // timing-attack surface.
     const signatureValid =
       expectedSignature.length === signature.length &&
       crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature));
@@ -105,22 +100,18 @@ router.post(
 
     const paymentEntity = body.payload?.payment?.entity;
     if (!paymentEntity) {
-      // Not a payment event we care about (e.g. refund/dispute) — ack it so
-      // Razorpay doesn't retry forever, just don't act on it yet.
       return res.status(200).send("ignored");
     }
 
     const { data: payment, error: fetchError } = await supabaseAdmin
       .from("payments")
-      .select("id, user_id, status, credits_promised, pack_snapshot, taxable_value_minor, tax_minor")
+      .select("id, user_id, status, credits_promised, pack_snapshot, taxable_value_minor, tax_minor, renews_period_id")
       .eq("gateway", "razorpay")
       .eq("gateway_payment_id", paymentEntity.order_id)
       .maybeSingle();
 
     if (fetchError || !payment) {
       req.log.error({ err: fetchError, orderId: paymentEntity.order_id }, "webhook for unknown payment order");
-      // Still 200 — a 4xx/5xx here just makes Razorpay retry a payment we
-      // will never be able to match.
       return res.status(200).send("unknown order");
     }
 
@@ -144,23 +135,13 @@ router.post(
           .eq("id", payment.id);
       }
 
-      // fn_grant_credits is idempotent on (type='purchase', reference_id) —
-      // a replayed webhook for the same payment is a safe no-op here, this
-      // was proven against real duplicate calls back in Week 1.
-      const { error: grantError } = await supabaseAdmin.rpc("fn_grant_credits", {
-        p_user_id: payment.user_id,
-        p_amount: payment.credits_promised,
-        p_type: "purchase",
-        p_reference_id: payment.id,
-        p_reason_code: "razorpay_payment_captured",
-      });
-
-      if (grantError) {
-        req.log.error({ err: grantError }, "fn_grant_credits failed for captured payment");
-        return res.status(500).send("grant failed");
+      // Atomic grant + subscription advance (idempotent). Replaces bare fn_grant_credits.
+      const renewal = await completeSubscriptionPayment(payment.id as string, req.log);
+      if (!renewal.ok) {
+        req.log.error({ paymentId: payment.id, renewal }, "subscription completion failed for captured payment");
+        return res.status(500).send("subscription grant failed");
       }
 
-      // Invoice is best-effort AFTER credits. Failure must not fail the webhook.
       const packSnapshot = payment.pack_snapshot as PackSnapshotRow | null;
       if (packSnapshot && typeof packSnapshot.total_minor === "number") {
         try {
@@ -175,13 +156,18 @@ router.post(
           });
           if ("skipped" in result) {
             req.log.warn({ paymentId: payment.id, reason: result.reason }, "invoice not issued");
+          } else {
+            const renewsPeriodId = payment.renews_period_id as string | null;
+            if (renewsPeriodId) {
+              await markProformaPaidForPeriod(renewsPeriodId, result.invoiceId, req.log);
+            } else if (renewal.period_id) {
+              await markProformaPaidForPeriod(renewal.period_id, result.invoiceId, req.log);
+            }
           }
         } catch (err) {
-          req.log.error({ err, paymentId: payment.id }, "invoice issuance threw after credit grant");
+          req.log.error({ err, paymentId: payment.id }, "invoice issuance threw after subscription grant");
         }
       } else {
-        // Pre-invoicing payment rows (or in-flight checkouts from before deploy)
-        // still grant credits; invoices start for new checkouts that freeze pack_snapshot.
         req.log.info({ paymentId: payment.id }, "skipping invoice — no pack_snapshot on payment");
       }
     } else if (body.event === "payment.failed") {

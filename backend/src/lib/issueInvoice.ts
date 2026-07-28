@@ -40,12 +40,13 @@ export interface PackSnapshotRow {
 export interface InvoiceRow {
   id: string;
   user_id: string;
-  payment_id: string;
+  payment_id: string | null;
   invoice_number: string;
-  receipt_number: string;
+  receipt_number: string | null;
   financial_year: string;
   series: string;
   invoice_date: string;
+  due_date?: string | null;
   issued_at: string;
   document_type: string;
   status: string;
@@ -67,6 +68,8 @@ export interface InvoiceRow {
   template_version: number;
   pdf_storage_path: string | null;
   pdf_sha256: string | null;
+  related_tax_invoice_id?: string | null;
+  subscription_period_id?: string | null;
 }
 
 function formatMoneyMinor(minor: number, currency = "INR"): string {
@@ -145,6 +148,8 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
   const buyer = invoice.buyer_snapshot;
   const half = halfRateLabel(invoice.tax_rate_bps);
   const full = rateLabel(invoice.tax_rate_bps);
+  const isProforma = invoice.document_type === "proforma_invoice";
+  const moneyLabel = formatMoneyMinor(invoice.total_minor, invoice.currency);
 
   const totals: InvoiceRenderModel["totals"] = [
     { label: "Subtotal", amount_label: formatMoneyMinor(invoice.taxable_value_minor, invoice.currency) },
@@ -157,12 +162,12 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
   }
   totals.push({
     label: "Total",
-    amount_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
+    amount_label: moneyLabel,
     bold: true,
   });
   totals.push({
-    label: "Amount paid",
-    amount_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
+    label: isProforma ? "Amount due" : "Amount paid",
+    amount_label: moneyLabel,
     bold: true,
   });
 
@@ -172,7 +177,7 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
         ? li.description
         : typeof li.name === "string"
           ? li.name
-          : "Credits pack";
+          : "Monthly plan";
     const credits = typeof li.credits === "number" ? li.credits : null;
     const desc =
       credits && !description.toLowerCase().includes("credit")
@@ -191,16 +196,22 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
 
   const issuedAt = new Date(invoice.issued_at);
   const dateLabel = formatIstLongDate(issuedAt);
-
+  const dueLabel = invoice.due_date ? formatIstLongDate(new Date(`${invoice.due_date}T00:00:00+05:30`)) : null;
   const emailFromBuyer = typeof buyer.email === "string" ? buyer.email : null;
 
   return {
+    document_title: isProforma ? "Pro Forma Invoice" : "Tax Invoice / Receipt",
     invoice_number: invoice.invoice_number,
     receipt_number: invoice.receipt_number,
     invoice_date_label: dateLabel,
     paid_on_label: dateLabel,
-    status: "PAID",
-    note: invoice.buyer_snapshot.entity_type === "business" ? "Business Purchase" : null,
+    due_date_label: dueLabel,
+    status: isProforma ? (invoice.status === "paid" ? "PAID" : "PAYMENT DUE") : "PAID",
+    note: isProforma
+      ? "Monthly plan renewal — not a tax invoice"
+      : invoice.buyer_snapshot.entity_type === "business"
+        ? "Business Purchase"
+        : null,
     place_of_supply: `${invoice.place_of_supply_state_name} (${invoice.place_of_supply_state_code})`,
     seller: {
       legal_name: seller.legal_name,
@@ -221,13 +232,14 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
       address_lines: buyerAddressLines(buyer),
       email: emailFromBuyer ?? buyerEmail ?? null,
     },
-    amount_paid_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
+    amount_paid_label: moneyLabel,
+    amount_due_label: moneyLabel,
     currency: invoice.currency,
     line_items: lineItems.length
       ? lineItems
       : [
           {
-            description: "Credits pack",
+            description: "Monthly plan",
             sac_code: null,
             qty: 1,
             unit_price_label: formatMoneyMinor(invoice.taxable_value_minor, invoice.currency),
@@ -235,16 +247,19 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
           },
         ],
     totals,
-    payment_history: [
-      {
-        method: paymentMethodLabel(invoice.payment_snapshot ?? {}),
-        date_label: dateLabel,
-        amount_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
-        receipt_number: invoice.receipt_number,
-      },
-    ],
+    payment_history: isProforma
+      ? []
+      : [
+          {
+            method: paymentMethodLabel(invoice.payment_snapshot ?? {}),
+            date_label: dateLabel,
+            amount_label: moneyLabel,
+            receipt_number: invoice.receipt_number ?? invoice.invoice_number,
+          },
+        ],
     amount_in_words: invoice.amount_in_words,
     reverse_charge: "No",
+    is_proforma: isProforma,
   };
 }
 

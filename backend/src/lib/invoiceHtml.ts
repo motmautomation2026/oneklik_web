@@ -1,8 +1,10 @@
 export interface InvoiceRenderModel {
+  document_title: string;
   invoice_number: string;
-  receipt_number: string;
+  receipt_number: string | null;
   invoice_date_label: string;
   paid_on_label: string;
+  due_date_label: string | null;
   status: string;
   note: string | null;
   place_of_supply: string;
@@ -21,6 +23,7 @@ export interface InvoiceRenderModel {
     email: string | null;
   };
   amount_paid_label: string;
+  amount_due_label: string;
   currency: string;
   line_items: Array<{
     description: string;
@@ -38,6 +41,7 @@ export interface InvoiceRenderModel {
   }>;
   amount_in_words: string;
   reverse_charge: string;
+  is_proforma: boolean;
 }
 
 function escapeHtml(s: string): string {
@@ -246,14 +250,23 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
 <body>
   <div class="page">
     <div class="header">
-      <h1>Receipt</h1>
+      <h1>${escapeHtml(model.document_title)}</h1>
       <p class="logo">One-Klik</p>
     </div>
 
     <table class="meta">
-      <tr><td class="label">Invoice number</td><td class="value mono">${escapeHtml(model.invoice_number)}</td></tr>
-      <tr><td class="label">Receipt number</td><td class="value mono">${escapeHtml(model.receipt_number)}</td></tr>
-      <tr><td class="label">Date paid</td><td class="value">${escapeHtml(model.invoice_date_label)}</td></tr>
+      <tr><td class="label">${model.is_proforma ? "Pro forma number" : "Invoice number"}</td><td class="value mono">${escapeHtml(model.invoice_number)}</td></tr>
+      ${
+        model.receipt_number
+          ? `<tr><td class="label">Receipt number</td><td class="value mono">${escapeHtml(model.receipt_number)}</td></tr>`
+          : ""
+      }
+      <tr><td class="label">${model.is_proforma ? "Date issued" : "Date paid"}</td><td class="value">${escapeHtml(model.invoice_date_label)}</td></tr>
+      ${
+        model.due_date_label
+          ? `<tr><td class="label">Payment due</td><td class="value">${escapeHtml(model.due_date_label)}</td></tr>`
+          : ""
+      }
       <tr><td class="label">Status</td><td class="value status">${escapeHtml(model.status)}</td></tr>
       <tr><td class="label">Place of supply</td><td class="value">${escapeHtml(model.place_of_supply)}</td></tr>
       ${model.note ? `<tr><td class="label">Note</td><td class="value">${escapeHtml(model.note)}</td></tr>` : ""}
@@ -278,8 +291,13 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
     </div>
 
     <div class="amount-line">
-      <span class="paid">${escapeHtml(model.amount_paid_label)}</span>
-      <span> paid on ${escapeHtml(model.paid_on_label)}</span>
+      ${
+        model.is_proforma
+          ? `<span class="paid">${escapeHtml(model.amount_due_label)}</span><span> due${
+              model.due_date_label ? ` by ${escapeHtml(model.due_date_label)}` : ""
+            }</span>`
+          : `<span class="paid">${escapeHtml(model.amount_paid_label)}</span><span> paid on ${escapeHtml(model.paid_on_label)}</span>`
+      }
     </div>
 
     <table class="items">
@@ -302,24 +320,33 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
       </table>
     </div>
 
-    <p class="section-title">Payment history</p>
+    ${
+      model.is_proforma
+        ? `<p class="section-title">Payment instructions</p>
+    <p class="footer">This is a pro forma invoice for your upcoming monthly plan renewal. A tax invoice and receipt will be issued after payment is received. Pay by the due date (or within the 3-day grace period) to keep unused credits rolled over on the same plan or an upgrade.</p>`
+        : `<p class="section-title">Payment history</p>
     <table class="pay">
       <thead>
         <tr>
           <th>Payment method</th>
           <th>Date</th>
           <th class="num">Amount paid</th>
-          <th>Receipt number</th>
+          <th class="num">Receipt number</th>
         </tr>
       </thead>
       <tbody>
         ${payRows}
       </tbody>
-    </table>
+    </table>`
+    }
 
     <div class="footer">
       <div>Amount in words: ${escapeHtml(model.amount_in_words)}</div>
-      <div>Reverse charge: ${escapeHtml(model.reverse_charge)} · This is a computer-generated receipt and does not require a physical signature.</div>
+      <div>Reverse charge: ${escapeHtml(model.reverse_charge)} · ${
+        model.is_proforma
+          ? "This is a computer-generated pro forma invoice and does not require a physical signature."
+          : "This is a computer-generated receipt and does not require a physical signature."
+      }</div>
     </div>
   </div>
 </body>

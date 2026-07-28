@@ -16,7 +16,7 @@ interface Wallet {
 // 'hold' and 'release' are the reserve/refund halves of a hold that either
 // converts into a 'deduct' or unwinds to nothing — showing them would just
 // duplicate the same credits as a phantom "used then refunded" pair.
-type LedgerType = "deduct" | "purchase" | "promo_grant" | "admin_adjustment";
+type LedgerType = "deduct" | "purchase" | "promo_grant" | "admin_adjustment" | "expiry";
 
 interface LedgerRow {
   id: number;
@@ -44,7 +44,7 @@ const RUN_TYPE_LABELS: Record<string, string> = {
 };
 
 function directionOf(row: LedgerRow): Direction {
-  if (row.type === "deduct") return "debit";
+  if (row.type === "deduct" || row.type === "expiry") return "debit";
   if (row.type === "admin_adjustment") return row.amount < 0 ? "debit" : "credit";
   return "credit";
 }
@@ -56,11 +56,13 @@ function describe(row: LedgerRow, runTypeByRunId: Map<string, string>): string {
   }
   switch (row.type) {
     case "purchase":
-      return "Credit pack purchase";
+      return "Monthly plan purchase";
     case "promo_grant":
       return "Free credits";
     case "admin_adjustment":
       return "Admin adjustment";
+    case "expiry":
+      return "Credits expired";
   }
 }
 
@@ -101,14 +103,14 @@ export default function WalletPage() {
     let active = true;
     setLoadingRows(true);
 
-    // 'hold' and 'release' are excluded entirely — only a final deduct or an
+    // 'hold' and 'release' are excluded entirely — only a final deduct/expiry or an
     // actual grant (purchase/promo/admin) is a real transaction to show.
     const typesForFilter: LedgerType[] =
       filter === "credit"
         ? ["purchase", "promo_grant", "admin_adjustment"]
         : filter === "debit"
-          ? ["deduct", "admin_adjustment"]
-          : ["deduct", "purchase", "promo_grant", "admin_adjustment"];
+          ? ["deduct", "expiry", "admin_adjustment"]
+          : ["deduct", "expiry", "purchase", "promo_grant", "admin_adjustment"];
 
     supabase
       .from("credit_ledger")

@@ -127,6 +127,7 @@ export default function PaymentsPage() {
         .from("invoices")
         .select("id, payment_id, invoice_number")
         .in("payment_id", paymentIds)
+        .eq("document_type", "tax_invoice")
         .then(({ data: invoices }) => {
           if (!active) return;
           const map: Record<string, InvoiceLookup> = {};

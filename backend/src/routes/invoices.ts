@@ -15,7 +15,7 @@ router.get("/invoices", requireAuth, enforceAccountStatus({ allowFrozen: true })
   const { data, error } = await supabaseAdmin
     .from("invoices")
     .select(
-      "id, invoice_number, receipt_number, invoice_date, issued_at, status, taxable_value_minor, cgst_minor, sgst_minor, igst_minor, total_minor, currency, payment_id, supply_type, financial_year",
+      "id, invoice_number, receipt_number, invoice_date, issued_at, status, document_type, taxable_value_minor, cgst_minor, sgst_minor, igst_minor, total_minor, currency, payment_id, supply_type, financial_year, due_date",
     )
     .eq("user_id", userId)
     .order("issued_at", { ascending: false })

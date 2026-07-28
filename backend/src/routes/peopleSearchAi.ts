@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizePerson, type Person } from "../lib/revealFlow.js";
+import { ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
 
 const router = Router();
 
@@ -34,6 +35,7 @@ router.post("/hv/people-search-ai", requireAuth, enforceAccountStatus(), async (
   }
 
   const userId = req.user!.id;
+  await ensureSubscriptionCreditState(userId, req.log);
   const creditsNeeded = Math.ceil(AI_SEARCH_CAP / 25);
 
   const { data: run, error: runError } = await supabaseAdmin

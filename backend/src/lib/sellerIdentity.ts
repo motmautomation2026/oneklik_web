@@ -43,6 +43,10 @@ export function invoiceSeries(): string {
   return "INV";
 }
 
+export function proformaSeries(): string {
+  return "PI";
+}
+
 export function isSellerConfigured(): boolean {
   return true;
 }

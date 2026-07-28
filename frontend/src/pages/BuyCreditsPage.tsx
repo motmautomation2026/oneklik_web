@@ -70,7 +70,7 @@ const PLAN_FEATURES = [
   "LinkedIn Lookup",
   "AI-powered search",
   "Save to Lists & export",
-  "Credits Roll Over",
+  "Unused credits roll over on renew or upgrade",
 ];
 
 function loadRazorpayScript(): Promise<void> {
@@ -102,6 +102,14 @@ export default function BuyCreditsPage() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [pendingPack, setPendingPack] = useState<CreditPack | null>(null);
   const [emailCopied, setEmailCopied] = useState(false);
+  const [subscription, setSubscription] = useState<{
+    plan_id: string;
+    status: string;
+    current_period_end: string;
+    grace_ends_at: string;
+    pending_plan_id: string | null;
+    proforma: { id: string; invoice_number: string; status: string; due_date: string | null } | null;
+  } | null>(null);
 
   async function handleCopyEmail() {
     try {
@@ -117,11 +125,22 @@ export default function BuyCreditsPage() {
     Promise.all([
       apiGet<{ packs: CreditPack[] }>("/api/payments/packs"),
       apiGet<{ profile: BillingProfile | null; complete: boolean }>("/api/billing/profile"),
+      apiGet<{
+        subscription: {
+          plan_id: string;
+          status: string;
+          current_period_end: string;
+          grace_ends_at: string;
+          pending_plan_id: string | null;
+          proforma: { id: string; invoice_number: string; status: string; due_date: string | null } | null;
+        } | null;
+      }>("/api/billing/subscription").catch(() => ({ subscription: null })),
     ])
-      .then(([packsRes, billingRes]) => {
+      .then(([packsRes, billingRes, subRes]) => {
         setPacks(packsRes.packs);
         setBillingComplete(billingRes.complete);
         setBillingProfile(billingRes.profile);
+        setSubscription(subRes.subscription);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load credit packs"))
       .finally(() => setLoadingPacks(false));
@@ -210,7 +229,31 @@ export default function BuyCreditsPage() {
   return (
     <AppLayout>
       <Container fluid className="py-4 px-3 px-md-4">
-        <h1 className="h4 mb-4 text-primary">Buy Credits</h1>
+        <h1 className="h4 mb-4 text-primary">Monthly Plans</h1>
+
+        {subscription && (
+          <Alert variant={subscription.status === "past_due" || subscription.status === "expired" ? "warning" : "info"} className="mb-4">
+            <div className="fw-semibold mb-1">
+              Current plan: {PLAN_INFO[subscription.plan_id]?.label ?? subscription.plan_id}{" "}
+              <Badge bg="secondary" className="ms-1">
+                {subscription.status}
+              </Badge>
+            </div>
+            <div className="small">
+              Period ends {new Date(subscription.current_period_end).toLocaleDateString("en-IN")} · Grace until{" "}
+              {new Date(subscription.grace_ends_at).toLocaleDateString("en-IN")}
+              {subscription.proforma ? (
+                <>
+                  {" "}
+                  · Pro forma {subscription.proforma.invoice_number} ({subscription.proforma.status})
+                </>
+              ) : null}
+            </div>
+            <div className="small text-body-secondary mt-1">
+              Choose a plan below to renew. Same plan or upgrade keeps leftover credits; downgrade does not.
+            </div>
+          </Alert>
+        )}
 
         {error && (
           <Alert variant="danger" dismissible onClose={() => setError(null)}>
@@ -271,8 +314,9 @@ export default function BuyCreditsPage() {
                           )}
                           <h2 className="h5">{pack.credits.toLocaleString()} credits</h2>
                           <p className="text-body-secondary small flex-grow-1">
-                            One-time purchase. GST is added at checkout; credits appear after payment
-                            confirmation.
+                            Billed monthly. GST is added at checkout; credits appear after payment
+                            confirmation. Unused credits roll over when you renew the same plan or upgrade
+                            (not on downgrade). A 3-day grace period applies after the due date.
                             {info && <> Best for {info.bestFor.toLowerCase()}.</>}
                           </p>
                           <div className="mb-3">
@@ -317,8 +361,10 @@ export default function BuyCreditsPage() {
                                 <Spinner animation="border" size="sm" className="me-2" />
                                 Opening checkout…
                               </>
+                            ) : subscription ? (
+                              subscription.plan_id === pack.id ? "Renew plan" : "Switch & pay"
                             ) : (
-                              "Buy Now"
+                              "Subscribe"
                             )}
                           </Button>
                         </>

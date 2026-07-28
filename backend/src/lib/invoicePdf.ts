@@ -22,7 +22,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
       info: {
         Title: model.invoice_number,
         Author: "One-Klik",
-        Subject: "Receipt",
+        Subject: model.document_title,
       },
     });
 
@@ -36,7 +36,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     let y = PAGE_MARGIN;
 
     // Header
-    doc.fillColor("#111").font("Helvetica-Bold").fontSize(22).text("Receipt", left, y, { lineBreak: false });
+    doc.fillColor("#111").font("Helvetica-Bold").fontSize(22).text(model.document_title, left, y, { lineBreak: false });
     doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("One-Klik", left, y, {
       width: CONTENT_WIDTH,
       align: "right",
@@ -47,12 +47,12 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     // Meta block
     doc.fillColor("#111").fontSize(9);
     const meta: Array<[string, string]> = [
-      ["Invoice number", model.invoice_number],
-      ["Receipt number", model.receipt_number],
-      ["Date paid", model.invoice_date_label],
-      ["Status", model.status],
-      ["Place of supply", model.place_of_supply],
+      [model.is_proforma ? "Pro forma number" : "Invoice number", model.invoice_number],
     ];
+    if (model.receipt_number) meta.push(["Receipt number", model.receipt_number]);
+    meta.push([model.is_proforma ? "Date issued" : "Date paid", model.invoice_date_label]);
+    if (model.due_date_label) meta.push(["Payment due", model.due_date_label]);
+    meta.push(["Status", model.status], ["Place of supply", model.place_of_supply]);
     if (model.note) meta.push(["Note", model.note]);
 
     for (const [label, value] of meta) {
@@ -113,10 +113,17 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     y = Math.max(sy, by) + 20;
 
     // Amount line
-    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(14).text(pdfSafe(model.amount_paid_label), left, y, {
-      continued: true,
-    });
-    doc.fillColor("#111").text(` paid on ${model.paid_on_label}`);
+    if (model.is_proforma) {
+      doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(14).text(pdfSafe(model.amount_due_label), left, y, {
+        continued: true,
+      });
+      doc.fillColor("#111").text(model.due_date_label ? ` due by ${model.due_date_label}` : " due");
+    } else {
+      doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(14).text(pdfSafe(model.amount_paid_label), left, y, {
+        continued: true,
+      });
+      doc.fillColor("#111").text(` paid on ${model.paid_on_label}`);
+    }
     y = doc.y + 18;
 
     // Line items header
@@ -181,69 +188,78 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     }
 
     y += 18;
-    doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Payment history", left, y);
-    y = doc.y + 6;
-    doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
-    y += 8;
+    if (model.is_proforma) {
+      doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Payment instructions", left, y);
+      y = doc.y + 6;
+      doc.fillColor("#666").font("Helvetica").fontSize(8);
+      doc.text(
+        "This is a pro forma invoice for your upcoming monthly plan renewal. A tax invoice and receipt will be issued after payment. Pay by the due date (or within the 3-day grace period) to keep unused credits on the same plan or an upgrade.",
+        left,
+        y,
+        { width: CONTENT_WIDTH },
+      );
+      y = doc.y + 16;
+    } else {
+      doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Payment history", left, y);
+      y = doc.y + 6;
+      doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
+      y += 8;
 
-    // Fixed columns with gaps so Amount paid and Receipt number never collide.
-    // (Earlier layout butted those two columns at the same x edge.)
-    const gap = 10;
-    const methodW = 150;
-    const dateW = 105;
-    const amountW = 95;
-    const receiptW = CONTENT_WIDTH - methodW - dateW - amountW - gap * 3;
-    const payCols: Array<{ label: string; x: number; w: number; align: "left" | "right" }> = [
-      { label: "Payment method", x: left, w: methodW, align: "left" },
-      { label: "Date", x: left + methodW + gap, w: dateW, align: "left" },
-      { label: "Amount paid", x: left + methodW + dateW + gap * 2, w: amountW, align: "right" },
-      {
-        label: "Receipt number",
-        x: left + methodW + dateW + amountW + gap * 3,
-        w: receiptW,
-        align: "left",
-      },
-    ];
-
-    const headerY = y;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#222");
-    for (const col of payCols) {
-      doc.text(col.label, col.x, headerY, {
-        width: col.w,
-        align: col.align,
-        lineBreak: false,
-      });
-    }
-    y = headerY + 14;
-    doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
-    y += 8;
-
-    doc.font("Helvetica").fontSize(9).fillColor("#111");
-    for (const p of model.payment_history) {
-      const rowY = y;
-      const values = [
-        pdfSafe(p.method),
-        p.date_label,
-        pdfSafe(p.amount_label),
-        p.receipt_number,
+      // Fixed columns with gaps so Amount paid and Receipt number never collide.
+      const gap = 10;
+      const methodW = 150;
+      const dateW = 105;
+      const amountW = 95;
+      const receiptW = CONTENT_WIDTH - methodW - dateW - amountW - gap * 3;
+      const payCols: Array<{ label: string; x: number; w: number; align: "left" | "right" }> = [
+        { label: "Payment method", x: left, w: methodW, align: "left" },
+        { label: "Date", x: left + methodW + gap, w: dateW, align: "left" },
+        { label: "Amount paid", x: left + methodW + dateW + gap * 2, w: amountW, align: "right" },
+        {
+          label: "Receipt number",
+          x: left + methodW + dateW + amountW + gap * 3,
+          w: receiptW,
+          align: "left",
+        },
       ];
-      for (let i = 0; i < payCols.length; i++) {
-        const col = payCols[i];
-        doc.text(values[i], col.x, rowY, {
+
+      const headerY = y;
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#222");
+      for (const col of payCols) {
+        doc.text(col.label, col.x, headerY, {
           width: col.w,
           align: col.align,
           lineBreak: false,
         });
       }
-      y = rowY + 16;
+      y = headerY + 14;
+      doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
+      y += 8;
+
+      doc.font("Helvetica").fontSize(9).fillColor("#111");
+      for (const p of model.payment_history) {
+        const rowY = y;
+        const values = [pdfSafe(p.method), p.date_label, pdfSafe(p.amount_label), p.receipt_number];
+        for (let i = 0; i < payCols.length; i++) {
+          const col = payCols[i];
+          doc.text(values[i], col.x, rowY, {
+            width: col.w,
+            align: col.align,
+            lineBreak: false,
+          });
+        }
+        y = rowY + 16;
+      }
+      y += 20;
     }
 
-    y += 20;
     doc.fillColor("#666").font("Helvetica").fontSize(8);
     doc.text(`Amount in words: ${pdfSafe(model.amount_in_words)}`, left, y, { width: CONTENT_WIDTH });
     y = doc.y + 2;
     doc.text(
-      `Reverse charge: ${model.reverse_charge} · This is a computer-generated receipt and does not require a physical signature.`,
+      `Reverse charge: ${model.reverse_charge} · This is a computer-generated ${
+        model.is_proforma ? "pro forma invoice" : "receipt"
+      } and does not require a physical signature.`,
       left,
       y,
       { width: CONTENT_WIDTH },

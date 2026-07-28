@@ -34,10 +34,7 @@ export default function ProfilePage() {
             <Card className="shadow-sm">
               <Card.Body>
                 <div className="d-flex align-items-center gap-3 mb-4">
-                  <div
-                    className="rounded-circle bg-primary text-white fw-semibold d-flex align-items-center justify-content-center"
-                    style={{ width: 56, height: 56, fontSize: "1.1rem" }}
-                  >
+                  <div className="app-avatar" style={{ width: 56, height: 56, fontSize: "1.1rem" }}>
                     {initialsFromEmail(user?.email)}
                   </div>
                   <div>

@@ -1,0 +1,12 @@
+Still open — Priority 1 (real, cheap, unresolved)
+No timeout on outbound provider calls — company/people search, AI search, email/phone reveal, LinkedIn lookup all call n8n with no AbortSignal/timeout. A single hung workflow can hang a request indefinitely and, under concurrent load, exhaust connections for everyone. Still the single highest-value fix available — want me to start this now?
+No app-level rate limiting — nothing stops a retry loop or bad actor from running up real n8n cost on search/reveal endpoints.
+Still open — Priority 2 (before real customers/scale)
+Stuck-job auto-resolution — a run stuck in pending/running holds a user's credits forever with nothing automatic to release them; only visible if an admin happens to check the dashboard.
+No reconciliation/refund path for payments.
+No alerting channel (Slack/email) for critical failures — payment-grant errors, stuck runs — currently silent unless someone opens the admin dashboard.
+Seller invoice contact placeholders — billing_email: "billing@oneklik.demo" and phone: "+91 99999 00000" in sellerIdentity.ts, printed on every real invoice PDF.
+Pending your decision (not urgent, just unanswered)
+Whether to also migrate the DB payments.gateway check constraint to drop 'stripe' — I asked last turn, no answer yet. Fine to leave as-is indefinitely; it's genuinely harmless.
+Correctly deferred (not gaps, just not needed yet)
+Backup/secondary search provider, auto-scaling/infra, DB failover — premature for your current single-VPS scale; revisit only if real load justifies it.

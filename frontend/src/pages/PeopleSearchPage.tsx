@@ -13,6 +13,7 @@ import {
   Spinner,
   Tooltip,
 } from "react-bootstrap";
+import { Search } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import TagInput from "../components/TagInput";
 import ClampedNumberInput from "../components/ClampedNumberInput";
@@ -401,11 +402,14 @@ export default function PeopleSearchPage() {
                 )}
 
                 {!hasSearched && !loading && (
-                  <p className="text-body-secondary">
-                    {aiMode
-                      ? "Describe who you're looking for and click Search."
-                      : "Add company domains and click Find People to get started."}
-                  </p>
+                  <div className="text-center text-body-secondary py-5">
+                    <Search size={28} className="mb-2 opacity-50" />
+                    <p className="mb-0">
+                      {aiMode
+                        ? "Describe who you're looking for and click Search."
+                        : "Add company domains and click Find People to get started."}
+                    </p>
+                  </div>
                 )}
 
                 {loading && (

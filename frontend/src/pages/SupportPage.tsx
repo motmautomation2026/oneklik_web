@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Alert, Badge, Card, Spinner } from "react-bootstrap";
+import { ChatDots } from "react-bootstrap-icons";
 import { Link } from "react-router-dom";
 import SupportLayout from "../components/SupportLayout";
 import { fetchMyTickets, TICKET_STATUS_LABEL, TICKET_STATUS_VARIANT, type TicketSummary } from "../lib/supportApi";
@@ -56,6 +57,7 @@ export default function SupportPage() {
         {tickets && tickets.length === 0 && (
           <Card className="border-0 shadow-sm">
             <Card.Body className="text-center py-5">
+              <ChatDots size={28} className="mb-3 text-body-secondary opacity-50" />
               <p className="mb-3 text-body-secondary">You haven't raised any requests yet.</p>
               <Link to="/support/new" className="btn btn-primary">
                 Raise your first request

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
-import { Alert, Button, Card, Container, Form } from "react-bootstrap";
+import { Alert, Button, Card, Form } from "react-bootstrap";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { authErrorMessage } from "../lib/authErrorMessage";
+import AuthLayout from "../components/AuthLayout";
 
 export default function VerifyEmailPage() {
   const navigate = useNavigate();
@@ -37,7 +38,7 @@ export default function VerifyEmailPage() {
   }
 
   return (
-    <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+    <AuthLayout>
       <Card style={{ maxWidth: 420, width: "100%" }} className="p-4 shadow-sm text-center">
         <Card.Body>
           <h1 className="h4 mb-3">Check your inbox</h1>
@@ -82,6 +83,6 @@ export default function VerifyEmailPage() {
           </Button>
         </Card.Body>
       </Card>
-    </Container>
+    </AuthLayout>
   );
 }

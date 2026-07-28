@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Form, Modal, Spinner } from "react-bootstrap";
+import { ArrowLeft } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import { supabase } from "../lib/supabaseClient";
 import { apiPost } from "../lib/api";
@@ -178,8 +179,9 @@ export default function ListDetailPage() {
   return (
     <AppLayout>
       <Container fluid className="py-4 px-3 px-md-4">
-        <Link to="/lists" className="small d-inline-block mb-2">
-          ← All lists
+        <Link to="/lists" className="ticket-back-link mb-2">
+          <ArrowLeft size={14} />
+          All lists
         </Link>
 
         {error && <Alert variant="danger">{error}</Alert>}

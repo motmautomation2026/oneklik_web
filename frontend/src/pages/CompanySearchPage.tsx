@@ -14,6 +14,7 @@ import {
   Spinner,
   Tooltip,
 } from "react-bootstrap";
+import { ExclamationTriangleFill, Search } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import TagInput from "../components/TagInput";
 import ClampedNumberInput from "../components/ClampedNumberInput";
@@ -329,11 +330,14 @@ export default function CompanySearchPage() {
                 )}
 
                 {!hasSearched && !loading && (
-                  <p className="text-body-secondary">
-                    {aiMode
-                      ? "Describe what you're looking for and click Search."
-                      : "Set your filters and click Find Companies to get started."}
-                  </p>
+                  <div className="text-center text-body-secondary py-5">
+                    <Search size={28} className="mb-2 opacity-50" />
+                    <p className="mb-0">
+                      {aiMode
+                        ? "Describe what you're looking for and click Search."
+                        : "Set your filters and click Find Companies to get started."}
+                    </p>
+                  </div>
                 )}
 
                 {loading && (
@@ -365,10 +369,16 @@ export default function CompanySearchPage() {
                           <tr key={i}>
                             <td className="fw-semibold">{c.Company}</td>
                             <td>
-                              {c.Website || (
-                                <span title="No website found" className="text-warning">
-                                  ⚠
-                                </span>
+                              {c.Website ? (
+                                <a
+                                  href={c.Website.startsWith("http") ? c.Website : `https://${c.Website}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {c.Website}
+                                </a>
+                              ) : (
+                                <ExclamationTriangleFill title="No website found" className="text-warning" size={14} />
                               )}
                             </td>
                             <td className="text-truncate" style={{ maxWidth: 220 }}>

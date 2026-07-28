@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, ButtonGroup, Card, Col, Container, ProgressBar, Row, Spinner, Table } from "react-bootstrap";
+import { CreditCard } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/AuthProvider";
 import { supabase } from "../lib/supabaseClient";

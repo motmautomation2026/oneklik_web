@@ -182,7 +182,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
       doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Payment Due", left, y);
       y = doc.y + 4;
       doc.fillColor("#444").font("Helvetica").fontSize(9).text(
-        `Please pay the above amount${model.due_date_label ? ` by ${model.due_date_label}` : ""}. A 3-day grace period applies after the due date.`,
+        `Please pay the above amount${model.due_date_label ? ` by ${model.due_date_label}` : ""}. A 2-day buffer period applies after the due date.`,
         left,
         y,
         { width: CONTENT_WIDTH },

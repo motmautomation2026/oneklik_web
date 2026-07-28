@@ -6,6 +6,55 @@ import { INVOICE_TEMPLATE_VERSION } from "./invoiceHtml.js";
 import { findPack } from "./creditPacks.js";
 import type { BillingProfileRow, PackSnapshotRow } from "./issueInvoice.js";
 
+/**
+ * If more than one open proforma exists for a period (rare race), keep one and
+ * void the extras so Billing never shows two "Payment due" docs.
+ * No schema / payment changes — soft heal only.
+ */
+async function collapseExtraOpenProformas(args: {
+  periodId: string;
+  keepId: string;
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void };
+}): Promise<void> {
+  const { data: extras, error } = await supabaseAdmin
+    .from("invoices")
+    .select("id")
+    .eq("subscription_period_id", args.periodId)
+    .eq("document_type", "proforma_invoice")
+    .eq("status", "issued")
+    .is("payment_id", null)
+    .neq("id", args.keepId);
+
+  if (error) {
+    args.log?.warn({ err: error, periodId: args.periodId }, "failed listing extra open proformas");
+    return;
+  }
+  if (!extras?.length) return;
+
+  const { error: voidError } = await supabaseAdmin
+    .from("invoices")
+    .update({
+      status: "void",
+      related_tax_invoice_id: args.keepId,
+      updated_at: new Date().toISOString(),
+    })
+    .in(
+      "id",
+      extras.map((r) => r.id as string),
+    )
+    .eq("document_type", "proforma_invoice")
+    .eq("status", "issued");
+
+  if (voidError) {
+    args.log?.error({ err: voidError, periodId: args.periodId }, "failed voiding extra open proformas");
+  } else {
+    args.log?.warn(
+      { periodId: args.periodId, keepId: args.keepId, voided: extras.length },
+      "collapsed duplicate open proformas for period",
+    );
+  }
+}
+
 export async function issueProformaForPeriod(args: {
   userId: string;
   periodId: string;
@@ -26,7 +75,35 @@ export async function issueProformaForPeriod(args: {
     .maybeSingle();
 
   if (existingPeriod?.proforma_id) {
+    await collapseExtraOpenProformas({
+      periodId: args.periodId,
+      keepId: existingPeriod.proforma_id as string,
+      log: args.log,
+    });
     return { proformaId: existingPeriod.proforma_id as string };
+  }
+
+  // Soft heal: an open PI may exist even if period.proforma_id was never set.
+  const { data: strayOpen } = await supabaseAdmin
+    .from("invoices")
+    .select("id")
+    .eq("subscription_period_id", args.periodId)
+    .eq("document_type", "proforma_invoice")
+    .eq("status", "issued")
+    .is("payment_id", null)
+    .order("issued_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (strayOpen?.id) {
+    const keepId = strayOpen.id as string;
+    await supabaseAdmin
+      .from("subscription_periods")
+      .update({ proforma_id: keepId, updated_at: new Date().toISOString() })
+      .eq("id", args.periodId)
+      .is("proforma_id", null);
+    await collapseExtraOpenProformas({ periodId: args.periodId, keepId, log: args.log });
+    return { proformaId: keepId };
   }
 
   const seller = loadSellerSnapshot().seller;
@@ -108,6 +185,12 @@ export async function issueProformaForPeriod(args: {
     return { skipped: true, reason: error?.message ?? "fn_issue_proforma returned no id" };
   }
 
+  await collapseExtraOpenProformas({
+    periodId: args.periodId,
+    keepId: proformaId as string,
+    log: args.log,
+  });
+
   // Attach pay-by hint in payment_snapshot for rendering (non-legal metadata).
   await supabaseAdmin
     .from("invoices")
@@ -153,15 +236,40 @@ export async function findOpenProformaIdForPeriod(periodId: string): Promise<str
 
   const { data: inv } = await supabaseAdmin
     .from("invoices")
-    .select("id, status, document_type, payment_id")
+    .select("id, status, document_type, payment_id, total_minor, line_items")
     .eq("id", proformaId)
     .maybeSingle();
 
   if (!inv) return null;
   if (inv.document_type === "proforma_invoice" && inv.status === "issued" && !inv.payment_id) {
+    await collapseExtraOpenProformas({ periodId, keepId: inv.id as string });
     return inv.id as string;
   }
   return null;
+}
+
+/** True when open proforma totals match what was actually charged. */
+export async function openProformaMatchesPayment(args: {
+  proformaId: string;
+  packSnapshot: PackSnapshotRow;
+}): Promise<boolean> {
+  const { data: inv } = await supabaseAdmin
+    .from("invoices")
+    .select("id, total_minor, line_items, document_type, status")
+    .eq("id", args.proformaId)
+    .maybeSingle();
+
+  if (!inv || inv.document_type !== "proforma_invoice" || inv.status !== "issued") {
+    return false;
+  }
+  if (Number(inv.total_minor) !== Number(args.packSnapshot.total_minor)) {
+    return false;
+  }
+  const lineCredits = (inv.line_items as Array<Record<string, unknown>> | null)?.[0]?.credits;
+  if (typeof lineCredits === "number" && lineCredits !== args.packSnapshot.credits) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -347,6 +455,8 @@ async function taxInvoiceIdForPayment(paymentId: string): Promise<string | null>
 /**
  * Convert open INV proforma into paid tax invoice + RCP on the same row.
  * Idempotent via fn_finalize_proforma_payment.
+ * After a successful same-row finalize, stamp Date Paid to now (IST) so the
+ * document does not keep the earlier proforma issue date.
  */
 export async function finalizeProformaPayment(args: {
   proformaId: string;
@@ -368,7 +478,31 @@ export async function finalizeProformaPayment(args: {
     return { skipped: true, reason: error?.message ?? "fn_finalize_proforma_payment returned no id" };
   }
 
-  return { invoiceId: invoiceId as string };
+  const resolvedId = invoiceId as string;
+
+  // Same-row finalize keeps the old issued_at; correct Date Paid in-app only.
+  if (resolvedId === args.proformaId) {
+    const paidAt = new Date();
+    const { error: dateError } = await supabaseAdmin
+      .from("invoices")
+      .update({
+        invoice_date: istCalendarDate(paidAt),
+        issued_at: paidAt.toISOString(),
+        updated_at: paidAt.toISOString(),
+      })
+      .eq("id", resolvedId)
+      .eq("document_type", "tax_invoice")
+      .eq("payment_id", args.paymentId);
+
+    if (dateError) {
+      args.log?.warn(
+        { err: dateError, invoiceId: resolvedId, paymentId: args.paymentId },
+        "failed to stamp payment date on finalized proforma",
+      );
+    }
+  }
+
+  return { invoiceId: resolvedId };
 }
 
 /** Build a pack snapshot from live plan for proforma (not for tax invoice). */

@@ -84,14 +84,14 @@ router.post("/internal/billing-tick", async (req: Request, res: Response) => {
     }
   }
 
-  // Pro formas for periods ending within 3 days (and not yet issued)
-  const inThreeDays = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  // Pro formas for periods ending within 2 days (buffer window; not yet issued)
+  const inBufferDays = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
   const { data: renewing, error: renewError } = await supabaseAdmin
     .from("subscriptions")
     .select("id, user_id, plan_id, pending_plan_id, current_period_id, current_period_end, grace_ends_at, status")
     .in("status", ["active", "past_due"])
     .gte("current_period_end", now.toISOString())
-    .lte("current_period_end", inThreeDays.toISOString());
+    .lte("current_period_end", inBufferDays.toISOString());
 
   if (renewError) {
     req.log.error({ err: renewError }, "billing-tick failed loading proforma candidates");

@@ -11,6 +11,7 @@ import {
   closeOpenProformaForPeriod,
   finalizeProformaPayment,
   findOpenProformaIdForPeriod,
+  openProformaMatchesPayment,
   supersedeOpenProforma,
 } from "./issueProforma.js";
 
@@ -384,6 +385,27 @@ export async function issueDocumentForPayment(args: {
   if (args.renewsPeriodId) {
     const proformaId = await findOpenProformaIdForPeriod(args.renewsPeriodId);
     if (proformaId) {
+      // Plan switch: do not turn an old-plan proforma into the paid tax invoice.
+      const matches = await openProformaMatchesPayment({
+        proformaId,
+        packSnapshot: args.packSnapshot,
+      });
+      if (!matches) {
+        args.log?.warn(
+          { proformaId, paymentId: args.paymentId },
+          "open proforma does not match payment — issuing fresh tax invoice",
+        );
+        const issued = await issueInvoiceForPayment(args);
+        if ("invoiceId" in issued) {
+          await supersedeOpenProforma({
+            proformaId,
+            taxInvoiceId: issued.invoiceId,
+            log: args.log,
+          });
+        }
+        return issued;
+      }
+
       const finalized = await finalizeProformaPayment({
         proformaId,
         paymentId: args.paymentId,

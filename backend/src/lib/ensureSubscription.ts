@@ -2,7 +2,8 @@ import { supabaseAdmin } from "./supabaseAdmin.js";
 import type { CompleteSubscriptionResult, SubscriptionRow } from "./subscriptionBilling.js";
 import { issueProformaForPeriod } from "./issueProforma.js";
 
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+/** Days before period end when we start issuing the renewal proforma (matches buffer). */
+const BUFFER_DAYS_MS = 2 * 24 * 60 * 60 * 1000;
 
 async function ensureProformaForCurrentPeriod(
   row: SubscriptionRow,
@@ -13,14 +14,14 @@ async function ensureProformaForCurrentPeriod(
 
   const now = Date.now();
   const periodEnd = new Date(row.current_period_end).getTime();
-  const graceEnd = new Date(row.grace_ends_at).getTime();
+  const bufferEnd = new Date(row.grace_ends_at).getTime();
 
-  // Issue when approaching due (T-3), or already past due but still in grace.
-  const approachingDue = now < periodEnd && periodEnd - now <= THREE_DAYS_MS;
-  const inGraceOrPastDue = now >= periodEnd && now <= graceEnd;
+  // Issue when approaching due (T-2), or already past due but still in buffer.
+  const approachingDue = now < periodEnd && periodEnd - now <= BUFFER_DAYS_MS;
+  const inBufferOrPastDue = now >= periodEnd && now <= bufferEnd;
   const markedPastDue = row.status === "past_due";
 
-  if (!approachingDue && !inGraceOrPastDue && !markedPastDue) return;
+  if (!approachingDue && !inBufferOrPastDue && !markedPastDue) return;
 
   const { data: period } = await supabaseAdmin
     .from("subscription_periods")
@@ -82,7 +83,7 @@ export async function ensureSubscriptionCreditState(
     }
   }
 
-  // Pro forma after past_due marking so grace / past_due users get a payable document.
+  // Pro forma after past_due marking so buffer / past_due users get a payable document.
   await ensureProformaForCurrentPeriod(row, log);
 
   if (row.current_period_id && now > graceEnd && row.status !== "expired") {

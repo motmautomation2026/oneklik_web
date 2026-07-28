@@ -244,7 +244,7 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
         <div class="icon">1</div>
         <div>
           <div class="title">Payment Due</div>
-          <div>Please pay the above amount${model.due_date_label ? ` by ${escapeHtml(model.due_date_label)}` : ""}. A 3-day grace period applies after the due date.</div>
+          <div>Please pay the above amount${model.due_date_label ? ` by ${escapeHtml(model.due_date_label)}` : ""}. A 2-day buffer period applies after the due date.</div>
         </div>
       </div>
       <div class="row">

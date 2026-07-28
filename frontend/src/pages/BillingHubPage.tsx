@@ -525,7 +525,7 @@ export default function BillingHubPage() {
                         year: "numeric",
                       })}
                     </dd>
-                    <dt className="col-sm-4 text-body-secondary">Grace until</dt>
+                    <dt className="col-sm-4 text-body-secondary">Buffer until</dt>
                     <dd className="col-sm-8">
                       {new Date(subscription.grace_ends_at).toLocaleDateString("en-IN", {
                         day: "numeric",

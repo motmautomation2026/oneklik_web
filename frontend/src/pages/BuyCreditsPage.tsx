@@ -68,7 +68,7 @@ const PLAN_BILLING_POINTS = [
   "Billed monthly",
   "Credits after payment confirmation",
   "Rollover on renew or upgrade — not on downgrade",
-  "3-day grace after the due date",
+  "2-day buffer after the due date",
 ];
 
 const PLAN_FEATURES = [
@@ -258,7 +258,7 @@ export default function BuyCreditsPage() {
                   </Badge>
                 </div>
                 <div className="small">
-                  Period ends {new Date(subscription.current_period_end).toLocaleDateString("en-IN")} · Grace until{" "}
+                  Period ends {new Date(subscription.current_period_end).toLocaleDateString("en-IN")} · Buffer until{" "}
                   {new Date(subscription.grace_ends_at).toLocaleDateString("en-IN")}
                   {subscription.proforma ? (
                     <>

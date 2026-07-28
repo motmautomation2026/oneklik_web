@@ -160,7 +160,8 @@ export default function WalletPage() {
       <Container fluid className="py-4 px-3 px-md-4">
         <div className="d-flex align-items-center justify-content-between mb-4">
           <h1 className="h4 mb-0 text-primary">Wallet</h1>
-          <Link to="/buy-credits" className="btn btn-primary btn-sm">
+          <Link to="/buy-credits" className="btn btn-primary btn-sm d-inline-flex align-items-center gap-2">
+            <CreditCard size={16} />
             View plans
           </Link>
         </div>

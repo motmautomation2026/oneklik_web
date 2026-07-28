@@ -124,80 +124,265 @@ export async function issueProformaForPeriod(args: {
   return { proformaId: proformaId as string };
 }
 
-export async function markProformaPaidForPeriod(
-  periodId: string,
-  taxInvoiceId: string,
-  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void },
-): Promise<void> {
-  const { data: period, error } = await supabaseAdmin
+/**
+ * Resolve open proforma for a renewing period (ending period), if any.
+ */
+export async function findOpenProformaIdForPeriod(periodId: string): Promise<string | null> {
+  const { data: period } = await supabaseAdmin
     .from("subscription_periods")
     .select("proforma_id")
     .eq("id", periodId)
     .maybeSingle();
 
-  if (error) {
-    log?.error({ err: error, periodId }, "failed to load period for proforma mark paid");
-    return;
-  }
-
-  // Also try previous period's proforma (renew pays for next; proforma was on ending period).
   let proformaId = period?.proforma_id as string | null | undefined;
 
+  // Fallback: row may have subscription_period_id even if period.proforma_id was never set.
   if (!proformaId) {
-    // Pro forma is issued against the period that is ending (renews_period), not the new one.
-    // Look up via invoices linked to any period for this user that is still issued.
-    const { data: sub } = await supabaseAdmin
-      .from("subscription_periods")
-      .select("id, subscription_id")
-      .eq("id", periodId)
+    const { data: byPeriod } = await supabaseAdmin
+      .from("invoices")
+      .select("id")
+      .eq("subscription_period_id", periodId)
+      .eq("document_type", "proforma_invoice")
+      .eq("status", "issued")
+      .is("payment_id", null)
       .maybeSingle();
+    proformaId = (byPeriod?.id as string | undefined) ?? null;
+  }
 
-    if (sub?.subscription_id) {
-      const { data: prior } = await supabaseAdmin
-        .from("subscription_periods")
-        .select("proforma_id")
-        .eq("subscription_id", sub.subscription_id)
-        .not("proforma_id", "is", null)
-        .order("period_end", { ascending: false })
-        .limit(5);
+  if (!proformaId) return null;
 
-      const open = (prior ?? []).find((p) => p.proforma_id);
-      // Prefer linking the most recent unpaid proforma
-      if (open?.proforma_id) {
-        const { data: inv } = await supabaseAdmin
-          .from("invoices")
-          .select("id, status")
-          .eq("id", open.proforma_id)
-          .eq("document_type", "proforma_invoice")
-          .maybeSingle();
-        if (inv && inv.status === "issued") {
-          proformaId = inv.id as string;
-        }
-      }
+  const { data: inv } = await supabaseAdmin
+    .from("invoices")
+    .select("id, status, document_type, payment_id")
+    .eq("id", proformaId)
+    .maybeSingle();
+
+  if (!inv) return null;
+  if (inv.document_type === "proforma_invoice" && inv.status === "issued" && !inv.payment_id) {
+    return inv.id as string;
+  }
+  return null;
+}
+
+/**
+ * Void an open proforma that was superseded by a separately issued tax invoice.
+ * Keeps payment_id null (DB constraint) and links related_tax_invoice_id for audit.
+ */
+export async function supersedeOpenProforma(args: {
+  proformaId: string;
+  taxInvoiceId: string;
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void };
+}): Promise<void> {
+  if (args.proformaId === args.taxInvoiceId) return;
+
+  const { error } = await supabaseAdmin
+    .from("invoices")
+    .update({
+      status: "void",
+      related_tax_invoice_id: args.taxInvoiceId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", args.proformaId)
+    .eq("document_type", "proforma_invoice")
+    .eq("status", "issued");
+
+  if (error) {
+    args.log?.error({ err: error, proformaId: args.proformaId }, "failed to supersede open proforma");
+  }
+}
+
+/** Close any open proforma for a renewed period once a tax invoice exists. */
+export async function closeOpenProformaForPeriod(args: {
+  periodId: string;
+  taxInvoiceId: string;
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void };
+}): Promise<void> {
+  const proformaId = await findOpenProformaIdForPeriod(args.periodId);
+  if (!proformaId) return;
+  await supersedeOpenProforma({
+    proformaId,
+    taxInvoiceId: args.taxInvoiceId,
+    log: args.log,
+  });
+}
+
+/**
+ * Heal orphans: open proformas for periods that were already paid/renewed.
+ * Matches via renews_period_id OR a successor period that has a successful payment + tax invoice.
+ */
+export async function repairOrphanProformasForUser(
+  userId: string,
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void },
+): Promise<number> {
+  const candidates = new Map<string, string>(); // proformaId -> periodId
+
+  const { data: openRows, error } = await supabaseAdmin
+    .from("invoices")
+    .select("id, subscription_period_id")
+    .eq("user_id", userId)
+    .eq("document_type", "proforma_invoice")
+    .eq("status", "issued")
+    .is("payment_id", null);
+
+  if (error) {
+    log?.error({ err: error, userId }, "failed to list open proformas for repair");
+    return 0;
+  }
+
+  for (const row of openRows ?? []) {
+    const periodId = row.subscription_period_id as string | null;
+    if (periodId) candidates.set(row.id as string, periodId);
+  }
+
+  const { data: periods } = await supabaseAdmin
+    .from("subscription_periods")
+    .select("id, proforma_id")
+    .eq("user_id", userId)
+    .not("proforma_id", "is", null);
+
+  for (const period of periods ?? []) {
+    const proformaId = period.proforma_id as string;
+    if (candidates.has(proformaId)) continue;
+    const { data: inv } = await supabaseAdmin
+      .from("invoices")
+      .select("id, status, document_type, payment_id")
+      .eq("id", proformaId)
+      .maybeSingle();
+    if (
+      inv &&
+      inv.document_type === "proforma_invoice" &&
+      inv.status === "issued" &&
+      !inv.payment_id
+    ) {
+      candidates.set(proformaId, period.id as string);
     }
   }
 
-  if (!proformaId) return;
+  let closed = 0;
+  for (const [proformaId, periodId] of candidates) {
+    const taxInvoiceId = await findTaxInvoiceThatSettledPeriod(periodId);
+    if (!taxInvoiceId) continue;
 
-  const { error: updateError } = await supabaseAdmin
-    .from("invoices")
-    .update({
-      status: "paid",
-      related_tax_invoice_id: taxInvoiceId,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", proformaId)
-    .eq("document_type", "proforma_invoice");
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from("invoices")
+      .update({
+        status: "void",
+        related_tax_invoice_id: taxInvoiceId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", proformaId)
+      .eq("document_type", "proforma_invoice")
+      .eq("status", "issued")
+      .select("id");
 
-  if (updateError) {
-    log?.error({ err: updateError, proformaId }, "failed to mark proforma paid");
+    if (updateError) {
+      log?.error({ err: updateError, proformaId }, "failed to supersede open proforma");
+      continue;
+    }
+    if (updated?.length) closed += 1;
   }
+
+  if (closed > 0) {
+    log?.warn({ userId, closed }, "repaired orphan open proformas");
+  }
+
+  return closed;
+}
+
+/**
+ * Find the tax invoice that settled a period: direct renew payment, or payment on the next period.
+ */
+async function findTaxInvoiceThatSettledPeriod(periodId: string): Promise<string | null> {
+  const { data: directPay } = await supabaseAdmin
+    .from("payments")
+    .select("id")
+    .eq("renews_period_id", periodId)
+    .eq("status", "success")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (directPay?.id) {
+    const taxId = await taxInvoiceIdForPayment(directPay.id as string);
+    if (taxId) return taxId;
+  }
+
+  const { data: period } = await supabaseAdmin
+    .from("subscription_periods")
+    .select("id, subscription_id, period_end")
+    .eq("id", periodId)
+    .maybeSingle();
+
+  if (!period?.subscription_id) return null;
+
+  // Next period starts at/after this period's end when renew succeeds.
+  const { data: successor } = await supabaseAdmin
+    .from("subscription_periods")
+    .select("id, payment_id")
+    .eq("subscription_id", period.subscription_id)
+    .gte("period_start", period.period_end)
+    .neq("id", periodId)
+    .not("payment_id", "is", null)
+    .order("period_start", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (successor?.payment_id) {
+    return taxInvoiceIdForPayment(successor.payment_id as string);
+  }
+
+  return null;
+}
+
+async function taxInvoiceIdForPayment(paymentId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("invoices")
+    .select("id")
+    .eq("payment_id", paymentId)
+    .eq("document_type", "tax_invoice")
+    .maybeSingle();
+  return (data?.id as string | undefined) ?? null;
+}
+
+/**
+ * Convert open INV proforma into paid tax invoice + RCP on the same row.
+ * Idempotent via fn_finalize_proforma_payment.
+ */
+export async function finalizeProformaPayment(args: {
+  proformaId: string;
+  paymentId: string;
+  paymentSnapshot: Record<string, unknown>;
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void };
+}): Promise<{ invoiceId: string } | { skipped: true; reason: string }> {
+  const { data: invoiceId, error } = await supabaseAdmin.rpc("fn_finalize_proforma_payment", {
+    p_proforma_id: args.proformaId,
+    p_payment_id: args.paymentId,
+    p_payment_snapshot: args.paymentSnapshot,
+  });
+
+  if (error || !invoiceId) {
+    args.log?.error(
+      { err: error, proformaId: args.proformaId, paymentId: args.paymentId },
+      "fn_finalize_proforma_payment failed",
+    );
+    return { skipped: true, reason: error?.message ?? "fn_finalize_proforma_payment returned no id" };
+  }
+
+  return { invoiceId: invoiceId as string };
 }
 
 /** Build a pack snapshot from live plan for proforma (not for tax invoice). */
 export function packSnapshotFromPlan(
   packId: string,
-  tax: { taxableMinor: number; taxTotalMinor: number; cgstMinor: number; sgstMinor: number; igstMinor: number; totalMinor: number; supplyType: string },
+  tax: {
+    taxableMinor: number;
+    taxTotalMinor: number;
+    cgstMinor: number;
+    sgstMinor: number;
+    igstMinor: number;
+    totalMinor: number;
+    supplyType: string;
+  },
 ): PackSnapshotRow | null {
   const pack = findPack(packId);
   if (!pack) return null;

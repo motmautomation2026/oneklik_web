@@ -4,14 +4,49 @@ import { issueProformaForPeriod } from "./issueProforma.js";
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
+async function ensureProformaForCurrentPeriod(
+  row: SubscriptionRow,
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void },
+): Promise<void> {
+  if (!row.current_period_id) return;
+  if (row.status === "expired" || row.status === "cancelled") return;
+
+  const now = Date.now();
+  const periodEnd = new Date(row.current_period_end).getTime();
+  const graceEnd = new Date(row.grace_ends_at).getTime();
+
+  // Issue when approaching due (T-3), or already past due but still in grace.
+  const approachingDue = now < periodEnd && periodEnd - now <= THREE_DAYS_MS;
+  const inGraceOrPastDue = now >= periodEnd && now <= graceEnd;
+  const markedPastDue = row.status === "past_due";
+
+  if (!approachingDue && !inGraceOrPastDue && !markedPastDue) return;
+
+  const { data: period } = await supabaseAdmin
+    .from("subscription_periods")
+    .select("id, proforma_id")
+    .eq("id", row.current_period_id)
+    .maybeSingle();
+
+  if (!period || period.proforma_id) return;
+
+  const planId = row.pending_plan_id || row.plan_id;
+  const result = await issueProformaForPeriod({
+    userId: row.user_id,
+    periodId: period.id as string,
+    planId,
+    periodEndIso: row.current_period_end,
+    graceEndsIso: row.grace_ends_at,
+    log,
+  });
+  if ("skipped" in result) {
+    log?.warn({ userId: row.user_id, reason: result.reason }, "lazy proforma skipped");
+  }
+}
+
 /**
  * Lazy billing maintenance for one user — no cron required.
- * Runs on Plans page, checkout, and credit holds:
- * - mark past_due after period end
- * - expire credits after grace
- * - issue pro forma when within 3 days of period end
- *
- * SQL RPCs are idempotent, so this is safe to call often.
+ * Runs on Plans page, Billing, checkout, and credit holds.
  */
 export async function ensureSubscriptionCreditState(
   userId: string,
@@ -36,36 +71,6 @@ export async function ensureSubscriptionCreditState(
   const periodEnd = new Date(row.current_period_end).getTime();
   const graceEnd = new Date(row.grace_ends_at).getTime();
 
-  // Pro forma when due date is within the next 3 days (and period not yet ended).
-  if (
-    row.current_period_id &&
-    row.status !== "expired" &&
-    row.status !== "cancelled" &&
-    now < periodEnd &&
-    periodEnd - now <= THREE_DAYS_MS
-  ) {
-    const { data: period } = await supabaseAdmin
-      .from("subscription_periods")
-      .select("id, proforma_id")
-      .eq("id", row.current_period_id)
-      .maybeSingle();
-
-    if (period && !period.proforma_id) {
-      const planId = row.pending_plan_id || row.plan_id;
-      const result = await issueProformaForPeriod({
-        userId,
-        periodId: period.id as string,
-        planId,
-        periodEndIso: row.current_period_end,
-        graceEndsIso: row.grace_ends_at,
-        log,
-      });
-      if ("skipped" in result) {
-        log?.warn({ userId, reason: result.reason }, "lazy proforma skipped");
-      }
-    }
-  }
-
   if (row.status === "active" && now > periodEnd && now <= graceEnd) {
     const { error: pastDueError } = await supabaseAdmin.rpc("fn_mark_subscription_past_due", {
       p_subscription_id: row.id,
@@ -76,6 +81,9 @@ export async function ensureSubscriptionCreditState(
       row.status = "past_due";
     }
   }
+
+  // Pro forma after past_due marking so grace / past_due users get a payable document.
+  await ensureProformaForCurrentPeriod(row, log);
 
   if (row.current_period_id && now > graceEnd && row.status !== "expired") {
     const { data, error: expireError } = await supabaseAdmin.rpc("fn_expire_subscription_period", {

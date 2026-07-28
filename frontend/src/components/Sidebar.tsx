@@ -8,6 +8,7 @@ import {
   Linkedin,
   ListUl,
   People,
+  Receipt,
   ShieldLock,
   Speedometer2,
   X,
@@ -28,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/linkedin-lookup", label: "LinkedIn Lookup", icon: Linkedin, group: "Search" },
   { to: "/lists", label: "Lists", icon: ListUl },
   { to: "/buy-credits", label: "Plans", icon: CreditCard },
+  { to: "/billing", label: "Billing", icon: Receipt },
 ];
 
 const STORAGE_KEY = "one-klik-sidebar-collapsed";

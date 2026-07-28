@@ -160,7 +160,7 @@ export default function WalletPage() {
         <div className="d-flex align-items-center justify-content-between mb-4">
           <h1 className="h4 mb-0 text-primary">Wallet</h1>
           <Link to="/buy-credits" className="btn btn-primary btn-sm">
-            Buy Credits
+            View plans
           </Link>
         </div>
 

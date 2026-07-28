@@ -3,64 +3,21 @@ import { Router } from "express";
 import express from "express";
 import crypto from "node:crypto";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
-import { razorpay } from "../lib/razorpay.js";
-import { issueInvoiceForPayment, type PackSnapshotRow } from "../lib/issueInvoice.js";
+import { issueDocumentForPayment, type PackSnapshotRow } from "../lib/issueInvoice.js";
 import { completeSubscriptionPayment } from "../lib/ensureSubscription.js";
-import { markProformaPaidForPeriod } from "../lib/issueProforma.js";
+import {
+  buildPaymentSnapshot,
+  enrichPaymentEntity,
+  type RazorpayPaymentEntity,
+} from "../lib/razorpayPaymentSnapshot.js";
 
 const router = Router();
-
-interface RazorpayPaymentEntity {
-  id: string;
-  order_id: string;
-  status: string;
-  method?: string;
-  bank?: string;
-  vpa?: string;
-  card?: { network?: string; last4?: string };
-  acquirer_data?: { rrn?: string; auth_code?: string };
-  email?: string;
-  contact?: string;
-  fee?: number;
-  tax?: number;
-  amount?: number;
-  currency?: string;
-}
 
 interface RazorpayWebhookBody {
   event: string;
   payload: {
     payment?: { entity: RazorpayPaymentEntity };
   };
-}
-
-function buildPaymentSnapshot(entity: RazorpayPaymentEntity): Record<string, unknown> {
-  return {
-    razorpay_payment_id: entity.id,
-    order_id: entity.order_id,
-    method: entity.method ?? null,
-    bank: entity.bank ?? null,
-    vpa: entity.vpa ?? null,
-    card_network: entity.card?.network ?? null,
-    card_last4: entity.card?.last4 ?? null,
-    rrn: entity.acquirer_data?.rrn ?? null,
-    auth_code: entity.acquirer_data?.auth_code ?? null,
-    email: entity.email ?? null,
-    contact: entity.contact ?? null,
-    fee: entity.fee ?? null,
-    tax: entity.tax ?? null,
-    amount: entity.amount ?? null,
-    currency: entity.currency ?? null,
-  };
-}
-
-async function enrichPaymentEntity(entity: RazorpayPaymentEntity): Promise<RazorpayPaymentEntity> {
-  try {
-    const fetched = (await razorpay.payments.fetch(entity.id)) as RazorpayPaymentEntity;
-    return { ...entity, ...fetched, id: entity.id, order_id: entity.order_id };
-  } catch {
-    return entity;
-  }
 }
 
 router.post(
@@ -146,23 +103,17 @@ router.post(
       if (packSnapshot && typeof packSnapshot.total_minor === "number") {
         try {
           const enriched = await enrichPaymentEntity(paymentEntity);
-          const result = await issueInvoiceForPayment({
+          const result = await issueDocumentForPayment({
             paymentId: payment.id as string,
             userId: payment.user_id as string,
             packSnapshot,
             paymentSnapshot: buildPaymentSnapshot(enriched),
+            renewsPeriodId: (payment.renews_period_id as string | null) ?? null,
             buyerEmail: enriched.email ?? null,
             log: req.log,
           });
           if ("skipped" in result) {
             req.log.warn({ paymentId: payment.id, reason: result.reason }, "invoice not issued");
-          } else {
-            const renewsPeriodId = payment.renews_period_id as string | null;
-            if (renewsPeriodId) {
-              await markProformaPaidForPeriod(renewsPeriodId, result.invoiceId, req.log);
-            } else if (renewal.period_id) {
-              await markProformaPaidForPeriod(renewal.period_id, result.invoiceId, req.log);
-            }
           }
         } catch (err) {
           req.log.error({ err, paymentId: payment.id }, "invoice issuance threw after subscription grant");

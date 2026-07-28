@@ -54,8 +54,8 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * Single HTML+CSS template for in-app preview and PDF.
- * template_version 1 — Stripe-style Tax Invoice layout.
+ * Invoice / pro forma HTML template (sample-style layout).
+ * Pro forma uses title "Pro Forma Invoice" with PAYMENT DUE badge.
  */
 export function renderInvoiceHtml(model: InvoiceRenderModel): string {
   const sellerLines = model.seller.address_lines.map((l) => escapeHtml(l)).join("<br/>");
@@ -77,26 +77,18 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
     .join("");
 
   const totalRows = model.totals
+    .filter((t) => !["Amount due", "Amount paid"].includes(t.label))
     .map(
       (t) => `
-      <tr class="${t.bold ? "bold" : ""}">
+      <tr class="${t.bold ? "bold highlight" : ""}">
         <td>${escapeHtml(t.label)}</td>
         <td class="num">${escapeHtml(t.amount_label)}</td>
       </tr>`,
     )
     .join("");
 
-  const payRows = model.payment_history
-    .map(
-      (p) => `
-      <tr>
-        <td>${escapeHtml(p.method)}</td>
-        <td>${escapeHtml(p.date_label)}</td>
-        <td class="num">${escapeHtml(p.amount_label)}</td>
-        <td class="mono">${escapeHtml(p.receipt_number)}</td>
-      </tr>`,
-    )
-    .join("");
+  const statusClass =
+    model.status === "PAID" ? "badge paid" : model.status === "VOID" ? "badge void" : "badge due";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -110,171 +102,101 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; }
     body {
-      margin: 0;
-      padding: 0;
+      margin: 0; padding: 0;
       font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-      color: #111;
-      background: #fff;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+      color: #111; background: #fff;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .page {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 48px 48px 40px;
-      margin: 0 auto;
-    }
-    .brand { color: #563da4; }
+    .page { width: 210mm; min-height: 297mm; padding: 48px 48px 40px; margin: 0 auto; }
     .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 28px;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      margin-bottom: 24px;
     }
-    .header h1 {
-      margin: 0;
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
+    .logo { margin: 0; font-size: 24px; font-weight: 700; color: #563da4; }
+    .doc-right { text-align: right; }
+    .doc-right h1 { margin: 0; font-size: 26px; font-weight: 700; }
+    .doc-right .inv-no { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; color: #333; }
+    .summary {
+      margin-bottom: 24px; font-size: 13px; line-height: 1.7;
     }
-    .header .logo {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 700;
-      color: #563da4;
+    .summary .label { font-weight: 600; color: #333; display: inline-block; width: 110px; }
+    .summary .amount-due { color: #563da4; font-size: 20px; font-weight: 700; margin: 8px 0; }
+    .badge {
+      display: inline-block; padding: 4px 12px; border-radius: 999px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
     }
-    .meta {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 28px;
-      font-size: 12px;
-    }
-    .meta td { padding: 3px 0; vertical-align: top; }
-    .meta .label {
-      width: 145px;
-      font-weight: 600;
-      color: #222;
-    }
-    .meta .value { color: #111; }
-    .meta .status { font-weight: 700; }
-    .parties {
-      display: flex;
-      gap: 32px;
-      margin-bottom: 28px;
-    }
+    .badge.due { background: #efe9fb; color: #563da4; }
+    .badge.paid { background: #e6f6ec; color: #1a7f37; }
+    .badge.void { background: #eee; color: #555; }
+    .parties { display: flex; gap: 40px; margin: 24px 0 28px; }
     .party { flex: 1; font-size: 12px; line-height: 1.55; color: #222; }
-    .party .title {
-      font-size: 13px;
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-    .party .title.brand { color: #563da4; }
-    .amount-line {
-      margin: 8px 0 28px;
-      font-size: 18px;
-      font-weight: 700;
-    }
-    .amount-line .paid { color: #563da4; }
+    .party .title { font-size: 12px; font-weight: 700; color: #563da4; margin-bottom: 6px; }
+    .party .name { font-weight: 700; }
     table.items {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      margin-bottom: 8px;
+      width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px;
     }
     table.items thead th {
-      text-align: left;
-      font-weight: 600;
-      padding: 0 0 8px;
-      border-bottom: 1.5px solid #563da4;
-      color: #222;
+      text-align: left; font-weight: 600; padding: 10px 8px;
+      background: #efe9fb; color: #563da4;
     }
-    table.items thead th.num,
-    table.items td.num { text-align: right; }
-    table.items thead th.qty,
-    table.items td.qty { text-align: center; width: 48px; }
+    table.items thead th.num, table.items td.num { text-align: right; }
+    table.items thead th.qty, table.items td.qty { text-align: center; width: 48px; }
     table.items tbody td {
-      padding: 12px 0;
-      border-bottom: 1px solid #ececec;
-      vertical-align: top;
+      padding: 12px 8px; border-bottom: 1px solid #ececec; vertical-align: top;
     }
     .desc-main { font-weight: 500; }
     .desc-sac { color: #888; font-size: 11px; margin-top: 2px; }
-    .totals-wrap {
-      display: flex;
-      justify-content: flex-end;
-      margin: 8px 0 32px;
-    }
-    table.totals {
-      width: 260px;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
-    table.totals td {
-      padding: 7px 0;
-      border-bottom: 1px solid #ececec;
-    }
+    .totals-wrap { display: flex; justify-content: flex-end; margin: 8px 0 28px; }
+    table.totals { width: 260px; border-collapse: collapse; font-size: 12px; }
+    table.totals td { padding: 7px 8px; border-bottom: 1px solid #ececec; }
     table.totals td.num { text-align: right; }
     table.totals tr.bold td { font-weight: 700; }
-    .section-title {
-      font-size: 13px;
-      font-weight: 700;
-      margin: 0 0 8px;
+    table.totals tr.highlight td { background: #efe9fb; }
+    .due-line { color: #563da4; font-weight: 700; font-size: 14px; text-align: right; margin: -16px 0 28px; padding-right: 8px; }
+    .pay-box { margin: 8px 0 24px; font-size: 12px; color: #333; line-height: 1.6; }
+    .pay-box .row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
+    .pay-box .icon {
+      width: 28px; height: 28px; border-radius: 50%; background: #563da4; color: #fff;
+      display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;
     }
-    table.pay {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      margin-bottom: 28px;
-    }
-    table.pay thead th {
-      text-align: left;
-      font-weight: 600;
-      padding: 0 0 8px;
-      border-bottom: 1.5px solid #563da4;
-    }
-    table.pay thead th.num,
-    table.pay td.num { text-align: right; }
-    table.pay tbody td {
-      padding: 10px 0;
-      border-bottom: 1px solid #ececec;
-    }
+    .pay-box .title { font-weight: 700; }
+    .note { font-size: 11px; color: #666; margin-bottom: 12px; }
+    .footer { margin-top: 16px; font-size: 11px; color: #666; line-height: 1.55; border-top: 1px solid #e5e5e5; padding-top: 14px; }
     .mono { font-variant-numeric: tabular-nums; }
-    .footer {
-      margin-top: 24px;
-      font-size: 11px;
-      color: #666;
-      line-height: 1.55;
-    }
   </style>
 </head>
 <body>
   <div class="page">
     <div class="header">
-      <h1>${escapeHtml(model.document_title)}</h1>
       <p class="logo">One-Klik</p>
+      <div class="doc-right">
+        <h1>${escapeHtml(model.document_title)}</h1>
+        <div class="inv-no mono">${escapeHtml(model.invoice_number)}</div>
+      </div>
     </div>
 
-    <table class="meta">
-      <tr><td class="label">${model.is_proforma ? "Pro forma number" : "Invoice number"}</td><td class="value mono">${escapeHtml(model.invoice_number)}</td></tr>
+    <div class="summary">
+      <div><span class="label">${model.is_proforma ? "Invoice Date" : "Date Paid"}</span>${escapeHtml(model.invoice_date_label)}</div>
       ${
-        model.receipt_number
-          ? `<tr><td class="label">Receipt number</td><td class="value mono">${escapeHtml(model.receipt_number)}</td></tr>`
+        model.is_proforma && model.due_date_label
+          ? `<div><span class="label">Due Date</span>${escapeHtml(model.due_date_label)}</div>`
           : ""
       }
-      <tr><td class="label">${model.is_proforma ? "Date issued" : "Date paid"}</td><td class="value">${escapeHtml(model.invoice_date_label)}</td></tr>
       ${
-        model.due_date_label
-          ? `<tr><td class="label">Payment due</td><td class="value">${escapeHtml(model.due_date_label)}</td></tr>`
-          : ""
+        model.is_proforma
+          ? `<div class="amount-due">${escapeHtml(model.amount_due_label)}</div>
+      <div><span class="label">Status</span><span class="${statusClass}">${escapeHtml(model.status)}</span></div>`
+          : `<div><span class="label">Status</span><span class="${statusClass}">${escapeHtml(model.status)}</span></div>
+      ${model.receipt_number ? `<div><span class="label">Receipt</span><span class="mono">${escapeHtml(model.receipt_number)}</span></div>` : ""}`
       }
-      <tr><td class="label">Status</td><td class="value status">${escapeHtml(model.status)}</td></tr>
-      <tr><td class="label">Place of supply</td><td class="value">${escapeHtml(model.place_of_supply)}</td></tr>
-      ${model.note ? `<tr><td class="label">Note</td><td class="value">${escapeHtml(model.note)}</td></tr>` : ""}
-    </table>
+    </div>
+
+    ${model.note ? `<p class="note">${escapeHtml(model.note)}</p>` : ""}
 
     <div class="parties">
       <div class="party">
-        <div class="title brand">${escapeHtml(model.seller.legal_name)}</div>
+        <div class="title">From</div>
+        <div class="name">${escapeHtml(model.seller.legal_name)}</div>
         <div>${sellerLines}</div>
         <div>GST: ${escapeHtml(model.seller.gstin)}</div>
         ${model.seller.billing_email ? `<div>${escapeHtml(model.seller.billing_email)}</div>` : ""}
@@ -282,7 +204,7 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
       </div>
       <div class="party">
         <div class="title">Bill To</div>
-        <div>${escapeHtml(model.buyer.legal_name)}</div>
+        <div class="name">${escapeHtml(model.buyer.legal_name)}</div>
         ${model.buyer.company ? `<div>${escapeHtml(model.buyer.company)}</div>` : ""}
         <div>${buyerLines}</div>
         ${model.buyer.gstin ? `<div>GST: ${escapeHtml(model.buyer.gstin)}</div>` : ""}
@@ -290,22 +212,12 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
       </div>
     </div>
 
-    <div class="amount-line">
-      ${
-        model.is_proforma
-          ? `<span class="paid">${escapeHtml(model.amount_due_label)}</span><span> due${
-              model.due_date_label ? ` by ${escapeHtml(model.due_date_label)}` : ""
-            }</span>`
-          : `<span class="paid">${escapeHtml(model.amount_paid_label)}</span><span> paid on ${escapeHtml(model.paid_on_label)}</span>`
-      }
-    </div>
-
     <table class="items">
       <thead>
         <tr>
           <th>Description</th>
           <th class="qty">Qty</th>
-          <th class="num">Unit price</th>
+          <th class="num">Unit Price</th>
           <th class="num">Amount</th>
         </tr>
       </thead>
@@ -319,33 +231,40 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
         ${totalRows}
       </table>
     </div>
+    ${
+      model.is_proforma
+        ? `<div class="due-line">Amount Due ${escapeHtml(model.amount_due_label)}</div>`
+        : `<div class="due-line">Amount Paid ${escapeHtml(model.amount_paid_label)}</div>`
+    }
 
     ${
       model.is_proforma
-        ? `<p class="section-title">Payment instructions</p>
-    <p class="footer">This is a pro forma invoice for your upcoming monthly plan renewal. A tax invoice and receipt will be issued after payment is received. Pay by the due date (or within the 3-day grace period) to keep unused credits rolled over on the same plan or an upgrade.</p>`
-        : `<p class="section-title">Payment history</p>
-    <table class="pay">
-      <thead>
-        <tr>
-          <th>Payment method</th>
-          <th>Date</th>
-          <th class="num">Amount paid</th>
-          <th class="num">Receipt number</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${payRows}
-      </tbody>
-    </table>`
+        ? `<div class="pay-box">
+      <div class="row">
+        <div class="icon">1</div>
+        <div>
+          <div class="title">Payment Due</div>
+          <div>Please pay the above amount${model.due_date_label ? ` by ${escapeHtml(model.due_date_label)}` : ""}. A 3-day grace period applies after the due date.</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="icon">2</div>
+        <div>
+          <div class="title">Bank / Payment</div>
+          <div>You can make the payment via Razorpay from Billing or Plans.</div>
+        </div>
+      </div>
+    </div>`
+        : ""
     }
 
     <div class="footer">
       <div>Amount in words: ${escapeHtml(model.amount_in_words)}</div>
-      <div>Reverse charge: ${escapeHtml(model.reverse_charge)} · ${
+      <div>Place of supply: ${escapeHtml(model.place_of_supply)} · Reverse charge: ${escapeHtml(model.reverse_charge)}</div>
+      <div>${
         model.is_proforma
-          ? "This is a computer-generated pro forma invoice and does not require a physical signature."
-          : "This is a computer-generated receipt and does not require a physical signature."
+          ? "This is a computer-generated pro forma invoice and does not require a signature."
+          : "This is a computer-generated invoice and does not require a signature."
       }</div>
     </div>
   </div>
@@ -353,4 +272,4 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
 </html>`;
 }
 
-export const INVOICE_TEMPLATE_VERSION = 1;
+export const INVOICE_TEMPLATE_VERSION = 2;

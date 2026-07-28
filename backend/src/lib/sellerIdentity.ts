@@ -43,8 +43,9 @@ export function invoiceSeries(): string {
   return "INV";
 }
 
+/** Pro formas reserve a real INV number (same series as tax invoices). */
 export function proformaSeries(): string {
-  return "PI";
+  return "INV";
 }
 
 export function isSellerConfigured(): boolean {

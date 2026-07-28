@@ -5,12 +5,19 @@ import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
 import { findPack, packPricingView } from "../lib/creditPacks.js";
+import { repairOrphanProformasForUser } from "../lib/issueProforma.js";
 
 const router = Router();
 
 router.get("/billing/subscription", requireAuth, enforceAccountStatus({ allowFrozen: true }), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const sub = await ensureSubscriptionCreditState(userId, req.log);
+
+  try {
+    await repairOrphanProformasForUser(userId, req.log);
+  } catch (err) {
+    req.log.warn({ err, userId }, "orphan proforma repair on subscription load failed");
+  }
 
   if (!sub) {
     return res.json({ subscription: null });
@@ -35,12 +42,15 @@ router.get("/billing/subscription", requireAuth, enforceAccountStatus({ allowFro
         .eq("id", period.proforma_id)
         .maybeSingle();
       if (inv) {
-        proforma = {
-          id: inv.id as string,
-          invoice_number: inv.invoice_number as string,
-          status: inv.status as string,
-          due_date: (inv.due_date as string | null) ?? null,
-        };
+        // Only surface open (payable) proformas on the subscription card / Pay now CTA.
+        if ((inv.status as string) === "issued") {
+          proforma = {
+            id: inv.id as string,
+            invoice_number: inv.invoice_number as string,
+            status: inv.status as string,
+            due_date: (inv.due_date as string | null) ?? null,
+          };
+        }
       }
     }
   }

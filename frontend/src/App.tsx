@@ -19,6 +19,8 @@ import ProfilePage from "./pages/ProfilePage";
 import WalletPage from "./pages/WalletPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import BillingDetailsPage from "./pages/BillingDetailsPage";
+import BillingHubPage from "./pages/BillingHubPage";
+import BillingDocumentPage from "./pages/BillingDocumentPage";
 import SupportPage from "./pages/SupportPage";
 import NewTicketPage from "./pages/NewTicketPage";
 import SupportTicketPage from "./pages/SupportTicketPage";
@@ -120,6 +122,22 @@ function App() {
             element={
               <RequireAuth requireOnboarded>
                 <WalletPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/billing"
+            element={
+              <RequireAuth requireOnboarded>
+                <BillingHubPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/billing/documents/:id"
+            element={
+              <RequireAuth requireOnboarded>
+                <BillingDocumentPage />
               </RequireAuth>
             }
           />

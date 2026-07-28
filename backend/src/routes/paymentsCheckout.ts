@@ -7,13 +7,17 @@ import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { razorpay, RAZORPAY_KEY_ID } from "../lib/razorpay.js";
 import { CREDIT_PACKS, computePackTax, findPack, packPricingView, packSnapshot } from "../lib/creditPacks.js";
 import { loadSellerSnapshot } from "../lib/sellerIdentity.js";
-import { issueInvoiceForPayment, type PackSnapshotRow } from "../lib/issueInvoice.js";
+import { issueDocumentForPayment, type PackSnapshotRow } from "../lib/issueInvoice.js";
+import { completeSubscriptionPayment, ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
+import { closeOpenProformaForPeriod, repairOrphanProformasForUser } from "../lib/issueProforma.js";
+import { buildRepairPaymentSnapshot } from "../lib/razorpayPaymentSnapshot.js";
 
 const router = Router();
 
 router.get("/payments/packs", requireAuth, enforceAccountStatus({ allowFrozen: true }), (_req: Request, res: Response) => {
   return res.json({
     packs: CREDIT_PACKS.map(packPricingView),
+    billing_model: "monthly",
   });
 });
 
@@ -22,10 +26,12 @@ router.post("/payments/checkout", requireAuth, enforceAccountStatus(), async (re
   const pack = typeof body.pack_id === "string" ? findPack(body.pack_id) : undefined;
 
   if (!pack) {
-    return res.status(400).json({ error: "Unknown or unavailable credit pack" });
+    return res.status(400).json({ error: "Unknown or unavailable monthly plan" });
   }
 
   const userId = req.user!.id;
+
+  await ensureSubscriptionCreditState(userId, req.log);
 
   const { data: billing, error: billingError } = await supabaseAdmin
     .from("billing_profiles")
@@ -45,8 +51,42 @@ router.post("/payments/checkout", requireAuth, enforceAccountStatus(), async (re
     });
   }
 
-  // Charge total = taxable + GST is identical for CGST+SGST and IGST.
-  // Seller state only affects the invoice tax-line split (hardcoded identity).
+  const { data: subscription } = await supabaseAdmin
+    .from("subscriptions")
+    .select("id, plan_id, status, current_period_id, current_period_end, grace_ends_at, pending_plan_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  let renewsPeriodId: string | null = null;
+  let billingIntent: "initial" | "renew" = "initial";
+
+  if (subscription?.current_period_id) {
+    billingIntent = "renew";
+    renewsPeriodId = subscription.current_period_id as string;
+
+    const { data: alreadyPaid } = await supabaseAdmin
+      .from("payments")
+      .select("id")
+      .eq("renews_period_id", renewsPeriodId)
+      .eq("status", "success")
+      .limit(1)
+      .maybeSingle();
+
+    if (alreadyPaid) {
+      // Period already renewed — treat as a fresh initial/rejoin only if expired;
+      // otherwise block duplicate renew checkouts.
+      const graceEnd = new Date(subscription.grace_ends_at as string).getTime();
+      if (Date.now() <= graceEnd && subscription.status !== "expired") {
+        return res.status(409).json({
+          error: "This billing period has already been paid",
+          code: "period_already_paid",
+        });
+      }
+      renewsPeriodId = null;
+      billingIntent = "initial";
+    }
+  }
+
   const sellerStateCode = loadSellerSnapshot().seller.state_code;
   const buyerStateCode = billing.state_code as string;
 
@@ -76,6 +116,8 @@ router.post("/payments/checkout", requireAuth, enforceAccountStatus(), async (re
       pack_snapshot: snapshot,
       taxable_value_minor: tax.taxableMinor,
       tax_minor: tax.taxTotalMinor,
+      renews_period_id: renewsPeriodId,
+      billing_intent: billingIntent,
     })
     .select("id")
     .single();
@@ -96,13 +138,12 @@ router.post("/payments/checkout", requireAuth, enforceAccountStatus(), async (re
         payment_id: paymentId,
         user_id: userId,
         pack_id: pack.id,
+        billing_intent: billingIntent,
         taxable_value_minor: String(tax.taxableMinor),
         tax_minor: String(tax.taxTotalMinor),
       },
     });
 
-    // Keep gateway_payment_id = order.id so the existing webhook matcher
-    // continues to work. Also store gateway_order_id explicitly.
     await supabaseAdmin
       .from("payments")
       .update({
@@ -140,22 +181,25 @@ router.post("/payments/checkout", requireAuth, enforceAccountStatus(), async (re
   }
 });
 
-// Polled by the frontend after the checkout modal closes — the webhook is
-// normally what flips status to "success". Invoice issuance also runs in the
-// webhook, but local/dev webhooks often hit production instead of this process.
-// If payment is already success and still has no invoice, repair it here so
-// polling after checkout still produces a tax invoice.
 router.get("/payments/:id/status", requireAuth, enforceAccountStatus({ allowFrozen: true }), async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const { data: payment, error } = await supabaseAdmin
     .from("payments")
-    .select("id, status, credits_promised, pack_snapshot, gateway_capture_id, gateway_payment_id")
+    .select("id, status, credits_promised, pack_snapshot, gateway_capture_id, gateway_payment_id, renews_period_id")
     .eq("id", req.params.id)
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error || !payment) {
     return res.status(404).json({ error: "Payment not found" });
+  }
+
+  if (payment.status === "success") {
+    try {
+      await completeSubscriptionPayment(payment.id as string, req.log);
+    } catch (err) {
+      req.log.error({ err, paymentId: payment.id }, "subscription repair threw on status poll");
+    }
   }
 
   let invoiceId: string | null = null;
@@ -165,25 +209,70 @@ router.get("/payments/:id/status", requireAuth, enforceAccountStatus({ allowFroz
     .from("invoices")
     .select("id, invoice_number")
     .eq("payment_id", payment.id)
+    .eq("document_type", "tax_invoice")
     .maybeSingle();
 
   if (existingInvoice) {
     invoiceId = existingInvoice.id as string;
     invoiceNumber = existingInvoice.invoice_number as string;
+    // Webhook may have issued the INV but left the PI open — heal on status poll.
+    const renewsPeriodId = (payment.renews_period_id as string | null) ?? null;
+    try {
+      if (renewsPeriodId) {
+        await closeOpenProformaForPeriod({
+          periodId: renewsPeriodId,
+          taxInvoiceId: existingInvoice.id as string,
+          log: req.log,
+        });
+      } else {
+        await repairOrphanProformasForUser(userId, req.log);
+      }
+    } catch (err) {
+      req.log.error({ err, paymentId: payment.id }, "proforma orphan repair threw on status poll");
+    }
+
+    // Backfill thin payment_snapshot (e.g. method: null from older repair path).
+    const captureId = (payment.gateway_capture_id as string | null) ?? null;
+    if (captureId) {
+      try {
+        const { data: invRow } = await supabaseAdmin
+          .from("invoices")
+          .select("payment_snapshot")
+          .eq("id", existingInvoice.id)
+          .maybeSingle();
+        const snap = (invRow?.payment_snapshot ?? {}) as Record<string, unknown>;
+        const methodMissing = !snap.method || snap.method === "unknown";
+        if (methodMissing) {
+          const enrichedSnap = await buildRepairPaymentSnapshot({
+            gatewayCaptureId: captureId,
+            gatewayOrderId: (payment.gateway_payment_id as string | null) ?? null,
+          });
+          await supabaseAdmin
+            .from("invoices")
+            .update({
+              payment_snapshot: { ...snap, ...enrichedSnap },
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existingInvoice.id);
+        }
+      } catch (err) {
+        req.log.warn({ err, paymentId: payment.id }, "payment_snapshot enrich on status poll failed");
+      }
+    }
   } else if (payment.status === "success") {
     const pack = payment.pack_snapshot as PackSnapshotRow | null;
     if (pack && typeof pack.total_minor === "number") {
       try {
-        const result = await issueInvoiceForPayment({
+        const paymentSnapshot = await buildRepairPaymentSnapshot({
+          gatewayCaptureId: (payment.gateway_capture_id as string | null) ?? null,
+          gatewayOrderId: (payment.gateway_payment_id as string | null) ?? null,
+        });
+        const result = await issueDocumentForPayment({
           paymentId: payment.id as string,
           userId,
           packSnapshot: pack,
-          paymentSnapshot: {
-            order_id: payment.gateway_payment_id,
-            razorpay_payment_id: payment.gateway_capture_id,
-            method: null,
-            source: "status_poll_repair",
-          },
+          paymentSnapshot,
+          renewsPeriodId: (payment.renews_period_id as string | null) ?? null,
           buyerEmail: req.user!.email ?? null,
           log: req.log,
         });
@@ -191,7 +280,7 @@ router.get("/payments/:id/status", requireAuth, enforceAccountStatus({ allowFroz
           invoiceId = result.invoiceId;
           const { data: issued } = await supabaseAdmin
             .from("invoices")
-            .select("invoice_number")
+            .select("id, invoice_number")
             .eq("id", result.invoiceId)
             .maybeSingle();
           invoiceNumber = (issued?.invoice_number as string | undefined) ?? null;

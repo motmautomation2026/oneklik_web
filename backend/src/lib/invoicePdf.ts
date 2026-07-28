@@ -3,17 +3,12 @@ import type { InvoiceRenderModel } from "./invoiceHtml.js";
 
 const BRAND = "#563da4";
 const PAGE_MARGIN = 48;
-const CONTENT_WIDTH = 595.28 - PAGE_MARGIN * 2; // A4 width in points
+const CONTENT_WIDTH = 595.28 - PAGE_MARGIN * 2;
 
-/** Helvetica lacks the ₹ glyph — keep PDF text readable. */
 function pdfSafe(s: string): string {
   return s.replace(/\u20B9/g, "Rs.");
 }
 
-/**
- * Render the invoice PDF in-process with pdfkit.
- * No Gotenberg, no extra container, no env vars — same deploy as today.
- */
 export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -22,7 +17,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
       info: {
         Title: model.invoice_number,
         Author: "One-Klik",
-        Subject: "Receipt",
+        Subject: model.document_title,
       },
     });
 
@@ -35,215 +30,184 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     const right = PAGE_MARGIN + CONTENT_WIDTH;
     let y = PAGE_MARGIN;
 
-    // Header
-    doc.fillColor("#111").font("Helvetica-Bold").fontSize(22).text("Receipt", left, y, { lineBreak: false });
-    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("One-Klik", left, y, {
+    // Header: brand left, title + INV right
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("One-Klik", left, y, { lineBreak: false });
+    doc.fillColor("#111").font("Helvetica-Bold").fontSize(20).text(model.document_title, left, y, {
       width: CONTENT_WIDTH,
       align: "right",
       lineBreak: false,
     });
-    y += 36;
+    y += 24;
+    doc.fillColor("#333").font("Helvetica").fontSize(10).text(model.invoice_number, left, y, {
+      width: CONTENT_WIDTH,
+      align: "right",
+    });
+    y = doc.y + 16;
 
-    // Meta block
-    doc.fillColor("#111").fontSize(9);
-    const meta: Array<[string, string]> = [
-      ["Invoice number", model.invoice_number],
-      ["Receipt number", model.receipt_number],
-      ["Date paid", model.invoice_date_label],
-      ["Status", model.status],
-      ["Place of supply", model.place_of_supply],
-    ];
-    if (model.note) meta.push(["Note", model.note]);
+    // Summary
+    doc.fillColor("#333").font("Helvetica-Bold").fontSize(10);
+    const dateLabel = model.is_proforma ? "Invoice Date" : "Date Paid";
+    doc.text(dateLabel, left, y, { continued: true, width: 100 });
+    doc.font("Helvetica").fillColor("#111").text(`  ${model.invoice_date_label}`);
+    y = doc.y + 4;
 
-    for (const [label, value] of meta) {
-      doc.font("Helvetica-Bold").text(label, left, y, { width: 130, lineBreak: false });
-      doc.font("Helvetica").text(pdfSafe(value), left + 140, y, { width: CONTENT_WIDTH - 140 });
-      y += 14;
+    if (model.is_proforma && model.due_date_label) {
+      doc.fillColor("#333").font("Helvetica-Bold").text("Due Date", left, y, { continued: true, width: 100 });
+      doc.font("Helvetica").fillColor("#111").text(`  ${model.due_date_label}`);
+      y = doc.y + 4;
     }
-    y += 16;
+
+    if (model.is_proforma) {
+      y += 6;
+      doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(16).text(pdfSafe(model.amount_due_label), left, y);
+      y = doc.y + 6;
+    }
+
+    doc.fillColor("#333").font("Helvetica-Bold").fontSize(10).text("Status", left, y, { continued: true });
+    doc.font("Helvetica").fillColor(model.status === "PAID" ? "#1a7f37" : BRAND).text(`  ${model.status}`);
+    y = doc.y + 6;
+
+    if (!model.is_proforma && model.receipt_number) {
+      doc.fillColor("#333").font("Helvetica-Bold").text("Receipt", left, y, { continued: true });
+      doc.font("Helvetica").fillColor("#111").text(`  ${model.receipt_number}`);
+      y = doc.y + 6;
+    }
+
+    if (model.note) {
+      y += 4;
+      doc.fillColor("#666").font("Helvetica").fontSize(9).text(model.note, left, y, { width: CONTENT_WIDTH });
+      y = doc.y + 10;
+    } else {
+      y += 10;
+    }
 
     // Parties
-    const colWidth = (CONTENT_WIDTH - 24) / 2;
-    const sellerX = left;
-    const buyerX = left + colWidth + 24;
-    const partiesTop = y;
-
-    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(10).text(model.seller.legal_name, sellerX, partiesTop, {
-      width: colWidth,
-    });
-    let sy = doc.y + 2;
-    doc.fillColor("#222").font("Helvetica").fontSize(9);
+    const colW = CONTENT_WIDTH / 2 - 10;
+    const sy = y;
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(10).text("From", left, sy);
+    doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text(pdfSafe(model.seller.legal_name), left, sy + 14);
+    doc.font("Helvetica").fontSize(9).fillColor("#222");
+    let ly = sy + 28;
     for (const line of model.seller.address_lines) {
-      doc.text(pdfSafe(line), sellerX, sy, { width: colWidth });
-      sy = doc.y;
+      doc.text(pdfSafe(line), left, ly, { width: colW });
+      ly = doc.y + 2;
     }
-    doc.text(`GST: ${model.seller.gstin}`, sellerX, sy, { width: colWidth });
-    sy = doc.y;
+    doc.text(`GST: ${model.seller.gstin}`, left, ly, { width: colW });
+    ly = doc.y + 2;
     if (model.seller.billing_email) {
-      doc.text(model.seller.billing_email, sellerX, sy, { width: colWidth });
-      sy = doc.y;
+      doc.text(model.seller.billing_email, left, ly, { width: colW });
+      ly = doc.y + 2;
     }
     if (model.seller.phone) {
-      doc.text(model.seller.phone, sellerX, sy, { width: colWidth });
-      sy = doc.y;
+      doc.text(model.seller.phone, left, ly, { width: colW });
+      ly = doc.y + 2;
     }
 
-    doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Bill To", buyerX, partiesTop, { width: colWidth });
-    let by = doc.y + 2;
-    doc.fillColor("#222").font("Helvetica").fontSize(9);
-    doc.text(pdfSafe(model.buyer.legal_name), buyerX, by, { width: colWidth });
-    by = doc.y;
-    if (model.buyer.company) {
-      doc.text(pdfSafe(model.buyer.company), buyerX, by, { width: colWidth });
-      by = doc.y;
-    }
+    const bx = left + colW + 20;
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(10).text("Bill To", bx, sy);
+    doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text(pdfSafe(model.buyer.legal_name), bx, sy + 14);
+    doc.font("Helvetica").fontSize(9).fillColor("#222");
+    let by = sy + 28;
     for (const line of model.buyer.address_lines) {
-      doc.text(pdfSafe(line), buyerX, by, { width: colWidth });
-      by = doc.y;
+      doc.text(pdfSafe(line), bx, by, { width: colW });
+      by = doc.y + 2;
     }
     if (model.buyer.gstin) {
-      doc.text(`GST: ${model.buyer.gstin}`, buyerX, by, { width: colWidth });
-      by = doc.y;
+      doc.text(`GST: ${model.buyer.gstin}`, bx, by, { width: colW });
+      by = doc.y + 2;
     }
     if (model.buyer.email) {
-      doc.text(model.buyer.email, buyerX, by, { width: colWidth });
-      by = doc.y;
+      doc.text(model.buyer.email, bx, by, { width: colW });
+      by = doc.y + 2;
     }
 
-    y = Math.max(sy, by) + 20;
-
-    // Amount line
-    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(14).text(pdfSafe(model.amount_paid_label), left, y, {
-      continued: true,
-    });
-    doc.fillColor("#111").text(` paid on ${model.paid_on_label}`);
-    y = doc.y + 18;
+    y = Math.max(ly, by) + 18;
 
     // Line items header
-    const descW = CONTENT_WIDTH - 200;
-    const qtyX = left + descW;
-    const unitX = qtyX + 40;
-    const amtX = unitX + 80;
+    doc.rect(left, y, CONTENT_WIDTH, 22).fill("#efe9fb");
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(9);
+    const cols = [
+      { x: left + 8, w: 250, label: "Description", align: "left" as const },
+      { x: left + 270, w: 40, label: "Qty", align: "center" as const },
+      { x: left + 320, w: 100, label: "Unit Price", align: "right" as const },
+      { x: left + 430, w: CONTENT_WIDTH - 438, label: "Amount", align: "right" as const },
+    ];
+    for (const c of cols) {
+      doc.text(c.label, c.x, y + 6, { width: c.w, align: c.align });
+    }
+    y += 28;
 
-    doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
-    y += 8;
-    doc.fillColor("#222").font("Helvetica-Bold").fontSize(9);
-    doc.text("Description", left, y, { width: descW, lineBreak: false });
-    doc.text("Qty", qtyX, y, { width: 40, align: "center", lineBreak: false });
-    doc.text("Unit price", unitX, y, { width: 80, align: "right", lineBreak: false });
-    doc.text("Amount", amtX, y, { width: 80, align: "right", lineBreak: false });
-    y += 14;
-    doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
-    y += 10;
-
-    doc.font("Helvetica").fillColor("#111");
+    doc.font("Helvetica").fontSize(9).fillColor("#111");
     for (const li of model.line_items) {
-      const rowTop = y;
-      doc.font("Helvetica").fontSize(9).text(pdfSafe(li.description), left, rowTop, { width: descW });
-      let rowBottom = doc.y;
+      const rowY = y;
+      doc.text(pdfSafe(li.description), cols[0].x, rowY, { width: cols[0].w });
       if (li.sac_code) {
-        doc.fillColor("#888").fontSize(8).text(`SAC ${li.sac_code}`, left, rowBottom, { width: descW });
-        rowBottom = doc.y;
-        doc.fillColor("#111");
+        doc.fillColor("#888").fontSize(8).text(`SAC ${li.sac_code}`, cols[0].x, doc.y + 1, { width: cols[0].w });
+        doc.fillColor("#111").fontSize(9);
       }
-      doc.font("Helvetica").fontSize(9);
-      doc.text(String(li.qty), qtyX, rowTop, { width: 40, align: "center", lineBreak: false });
-      doc.text(pdfSafe(li.unit_price_label), unitX, rowTop, { width: 80, align: "right", lineBreak: false });
-      doc.text(pdfSafe(li.amount_label), amtX, rowTop, { width: 80, align: "right", lineBreak: false });
-      y = Math.max(rowBottom, rowTop + 14) + 8;
-      doc
-        .moveTo(left, y)
-        .strokeColor("#ececec")
-        .lineWidth(0.6)
-        .lineTo(right, y)
-        .stroke();
+      const bottom = doc.y;
+      doc.text(String(li.qty), cols[1].x, rowY, { width: cols[1].w, align: "center" });
+      doc.text(pdfSafe(li.unit_price_label), cols[2].x, rowY, { width: cols[2].w, align: "right" });
+      doc.text(pdfSafe(li.amount_label), cols[3].x, rowY, { width: cols[3].w, align: "right" });
+      y = Math.max(bottom, rowY + 16) + 8;
+      doc.moveTo(left, y).strokeColor("#ececec").lineWidth(0.5).lineTo(right, y).stroke();
       y += 8;
     }
 
     // Totals
-    y += 4;
-    const totalsWidth = 220;
-    const totalsLabelX = right - totalsWidth;
-    const totalsValueX = right - 90;
-    for (const t of model.totals) {
-      if (t.bold) doc.font("Helvetica-Bold");
-      else doc.font("Helvetica");
-      doc.fontSize(9).fillColor("#111");
-      doc.text(t.label, totalsLabelX, y, { width: 120, lineBreak: false });
-      doc.text(pdfSafe(t.amount_label), totalsValueX, y, { width: 90, align: "right", lineBreak: false });
-      y += 16;
-      doc
-        .moveTo(totalsLabelX, y - 4)
-        .strokeColor("#ececec")
-        .lineWidth(0.5)
-        .lineTo(right, y - 4)
-        .stroke();
-    }
-
-    y += 18;
-    doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Payment history", left, y);
-    y = doc.y + 6;
-    doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
-    y += 8;
-
-    // Fixed columns with gaps so Amount paid and Receipt number never collide.
-    // (Earlier layout butted those two columns at the same x edge.)
-    const gap = 10;
-    const methodW = 150;
-    const dateW = 105;
-    const amountW = 95;
-    const receiptW = CONTENT_WIDTH - methodW - dateW - amountW - gap * 3;
-    const payCols: Array<{ label: string; x: number; w: number; align: "left" | "right" }> = [
-      { label: "Payment method", x: left, w: methodW, align: "left" },
-      { label: "Date", x: left + methodW + gap, w: dateW, align: "left" },
-      { label: "Amount paid", x: left + methodW + dateW + gap * 2, w: amountW, align: "right" },
-      {
-        label: "Receipt number",
-        x: left + methodW + dateW + amountW + gap * 3,
-        w: receiptW,
-        align: "left",
-      },
-    ];
-
-    const headerY = y;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#222");
-    for (const col of payCols) {
-      doc.text(col.label, col.x, headerY, {
-        width: col.w,
-        align: col.align,
-        lineBreak: false,
-      });
-    }
-    y = headerY + 14;
-    doc.moveTo(left, y).strokeColor(BRAND).lineWidth(1.2).lineTo(right, y).stroke();
-    y += 8;
-
-    doc.font("Helvetica").fontSize(9).fillColor("#111");
-    for (const p of model.payment_history) {
-      const rowY = y;
-      const values = [
-        pdfSafe(p.method),
-        p.date_label,
-        pdfSafe(p.amount_label),
-        p.receipt_number,
-      ];
-      for (let i = 0; i < payCols.length; i++) {
-        const col = payCols[i];
-        doc.text(values[i], col.x, rowY, {
-          width: col.w,
-          align: col.align,
-          lineBreak: false,
-        });
+    const totals = model.totals.filter((t) => !["Amount due", "Amount paid"].includes(t.label));
+    const totalsX = right - 200;
+    for (const t of totals) {
+      if (t.bold) {
+        doc.rect(totalsX, y - 2, 200, 18).fill("#efe9fb");
       }
-      y = rowY + 16;
+      doc.fillColor("#111").font(t.bold ? "Helvetica-Bold" : "Helvetica").fontSize(9);
+      doc.text(t.label, totalsX + 8, y, { width: 90 });
+      doc.text(pdfSafe(t.amount_label), totalsX + 90, y, { width: 102, align: "right" });
+      y += 18;
+    }
+    y += 6;
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(11);
+    doc.text(
+      model.is_proforma
+        ? `Amount Due ${pdfSafe(model.amount_due_label)}`
+        : `Amount Paid ${pdfSafe(model.amount_paid_label)}`,
+      totalsX,
+      y,
+      { width: 200, align: "right" },
+    );
+    y = doc.y + 16;
+
+    if (model.is_proforma) {
+      doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Payment Due", left, y);
+      y = doc.y + 4;
+      doc.fillColor("#444").font("Helvetica").fontSize(9).text(
+        `Please pay the above amount${model.due_date_label ? ` by ${model.due_date_label}` : ""}. A 2-day buffer period applies after the due date.`,
+        left,
+        y,
+        { width: CONTENT_WIDTH },
+      );
+      y = doc.y + 10;
+      doc.fillColor("#111").font("Helvetica-Bold").fontSize(10).text("Bank / Payment", left, y);
+      y = doc.y + 4;
+      doc.fillColor("#444").font("Helvetica").fontSize(9).text(
+        "You can make the payment via Razorpay from Billing or Plans.",
+        left,
+        y,
+        { width: CONTENT_WIDTH },
+      );
+      y = doc.y + 14;
     }
 
-    y += 20;
     doc.fillColor("#666").font("Helvetica").fontSize(8);
     doc.text(`Amount in words: ${pdfSafe(model.amount_in_words)}`, left, y, { width: CONTENT_WIDTH });
     y = doc.y + 2;
+    doc.text(`Place of supply: ${model.place_of_supply} · Reverse charge: ${model.reverse_charge}`, left, y, {
+      width: CONTENT_WIDTH,
+    });
+    y = doc.y + 2;
     doc.text(
-      `Reverse charge: ${model.reverse_charge} · This is a computer-generated receipt and does not require a physical signature.`,
+      `This is a computer-generated ${model.is_proforma ? "pro forma invoice" : "invoice"} and does not require a signature.`,
       left,
       y,
       { width: CONTENT_WIDTH },

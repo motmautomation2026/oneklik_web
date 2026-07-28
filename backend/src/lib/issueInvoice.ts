@@ -5,6 +5,15 @@ import { formatIstLongDate, indianFinancialYear, istCalendarDate } from "./india
 import { invoiceSeries, loadSellerSnapshot, type SellerSnapshot } from "./sellerIdentity.js";
 import { INVOICE_TEMPLATE_VERSION, renderInvoiceHtml, type InvoiceRenderModel } from "./invoiceHtml.js";
 import { renderInvoicePdf } from "./invoicePdf.js";
+import { renderPaymentReceiptHtml, type PaymentReceiptRenderModel } from "./receiptHtml.js";
+import { renderPaymentReceiptPdf } from "./receiptPdf.js";
+import {
+  closeOpenProformaForPeriod,
+  finalizeProformaPayment,
+  findOpenProformaIdForPeriod,
+  openProformaMatchesPayment,
+  supersedeOpenProforma,
+} from "./issueProforma.js";
 
 export interface BillingProfileRow {
   legal_name: string;
@@ -40,12 +49,13 @@ export interface PackSnapshotRow {
 export interface InvoiceRow {
   id: string;
   user_id: string;
-  payment_id: string;
+  payment_id: string | null;
   invoice_number: string;
-  receipt_number: string;
+  receipt_number: string | null;
   financial_year: string;
   series: string;
   invoice_date: string;
+  due_date?: string | null;
   issued_at: string;
   document_type: string;
   status: string;
@@ -67,6 +77,8 @@ export interface InvoiceRow {
   template_version: number;
   pdf_storage_path: string | null;
   pdf_sha256: string | null;
+  related_tax_invoice_id?: string | null;
+  subscription_period_id?: string | null;
 }
 
 function formatMoneyMinor(minor: number, currency = "INR"): string {
@@ -145,6 +157,8 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
   const buyer = invoice.buyer_snapshot;
   const half = halfRateLabel(invoice.tax_rate_bps);
   const full = rateLabel(invoice.tax_rate_bps);
+  const isProforma = invoice.document_type === "proforma_invoice";
+  const moneyLabel = formatMoneyMinor(invoice.total_minor, invoice.currency);
 
   const totals: InvoiceRenderModel["totals"] = [
     { label: "Subtotal", amount_label: formatMoneyMinor(invoice.taxable_value_minor, invoice.currency) },
@@ -157,12 +171,12 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
   }
   totals.push({
     label: "Total",
-    amount_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
+    amount_label: moneyLabel,
     bold: true,
   });
   totals.push({
-    label: "Amount paid",
-    amount_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
+    label: isProforma ? "Amount due" : "Amount paid",
+    amount_label: moneyLabel,
     bold: true,
   });
 
@@ -172,7 +186,7 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
         ? li.description
         : typeof li.name === "string"
           ? li.name
-          : "Credits pack";
+          : "Monthly plan";
     const credits = typeof li.credits === "number" ? li.credits : null;
     const desc =
       credits && !description.toLowerCase().includes("credit")
@@ -191,16 +205,29 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
 
   const issuedAt = new Date(invoice.issued_at);
   const dateLabel = formatIstLongDate(issuedAt);
-
+  const dueLabel = invoice.due_date ? formatIstLongDate(new Date(`${invoice.due_date}T00:00:00+05:30`)) : null;
   const emailFromBuyer = typeof buyer.email === "string" ? buyer.email : null;
 
+  let statusLabel = "PAID";
+  if (isProforma) {
+    if (invoice.status === "void" || invoice.status === "cancelled") statusLabel = "VOID";
+    else if (invoice.status === "paid") statusLabel = "PAID";
+    else statusLabel = "PAYMENT DUE";
+  }
+
   return {
+    document_title: isProforma ? "Pro Forma Invoice" : "Tax Invoice",
     invoice_number: invoice.invoice_number,
     receipt_number: invoice.receipt_number,
     invoice_date_label: dateLabel,
     paid_on_label: dateLabel,
-    status: "PAID",
-    note: invoice.buyer_snapshot.entity_type === "business" ? "Business Purchase" : null,
+    due_date_label: dueLabel,
+    status: statusLabel,
+    note: isProforma
+      ? "Pro forma — not a tax invoice until payment is received"
+      : invoice.buyer_snapshot.entity_type === "business"
+        ? "Business Purchase"
+        : null,
     place_of_supply: `${invoice.place_of_supply_state_name} (${invoice.place_of_supply_state_code})`,
     seller: {
       legal_name: seller.legal_name,
@@ -221,13 +248,14 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
       address_lines: buyerAddressLines(buyer),
       email: emailFromBuyer ?? buyerEmail ?? null,
     },
-    amount_paid_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
+    amount_paid_label: moneyLabel,
+    amount_due_label: moneyLabel,
     currency: invoice.currency,
     line_items: lineItems.length
       ? lineItems
       : [
           {
-            description: "Credits pack",
+            description: "Monthly plan",
             sac_code: null,
             qty: 1,
             unit_price_label: formatMoneyMinor(invoice.taxable_value_minor, invoice.currency),
@@ -235,21 +263,186 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
           },
         ],
     totals,
-    payment_history: [
-      {
-        method: paymentMethodLabel(invoice.payment_snapshot ?? {}),
-        date_label: dateLabel,
-        amount_label: formatMoneyMinor(invoice.total_minor, invoice.currency),
-        receipt_number: invoice.receipt_number,
-      },
-    ],
+    payment_history: isProforma
+      ? []
+      : [
+          {
+            method: paymentMethodLabel(invoice.payment_snapshot ?? {}),
+            date_label: dateLabel,
+            amount_label: moneyLabel,
+            receipt_number: invoice.receipt_number ?? invoice.invoice_number,
+          },
+        ],
     amount_in_words: invoice.amount_in_words,
     reverse_charge: "No",
+    is_proforma: isProforma,
   };
 }
 
-export function renderInvoiceDocument(invoice: InvoiceRow, buyerEmail?: string | null): string {
+export function invoiceToReceiptModel(invoice: InvoiceRow, buyerEmail?: string | null): PaymentReceiptRenderModel {
+  const buyer = invoice.buyer_snapshot;
+  const emailFromBuyer = typeof buyer.email === "string" ? buyer.email : null;
+  const moneyLabel = formatMoneyMinor(invoice.total_minor, invoice.currency);
+  const paidAt = new Date(invoice.issued_at);
+  const li = invoice.line_items?.[0];
+  const description =
+    typeof li?.description === "string"
+      ? li.description
+      : typeof li?.name === "string"
+        ? li.name
+        : "Monthly plan";
+
+  const city = typeof buyer.city === "string" ? buyer.city : "";
+  const state = typeof buyer.state_name === "string" ? buyer.state_name : "";
+  const location = [city, state, "India"].filter(Boolean).join(", ");
+
+  const snap = invoice.payment_snapshot ?? {};
+  const txn =
+    (typeof snap.razorpay_payment_id === "string" && snap.razorpay_payment_id) ||
+    (typeof snap.payment_id === "string" && snap.payment_id) ||
+    null;
+
+  return {
+    invoice_number: invoice.invoice_number,
+    receipt_number: invoice.receipt_number ?? invoice.invoice_number,
+    transaction_id: txn,
+    date_paid_label: formatIstLongDate(paidAt),
+    status: "PAID",
+    buyer_name: typeof buyer.legal_name === "string" ? buyer.legal_name : "Customer",
+    buyer_location: location || null,
+    buyer_email: emailFromBuyer ?? buyerEmail ?? null,
+    description,
+    amount_paid_label: moneyLabel,
+    payment_method: paymentMethodLabel(snap),
+    seller_name: invoice.seller_snapshot?.legal_name ?? "One-Klik",
+    seller_support_email: invoice.seller_snapshot?.billing_email ?? "support@oneklik.demo",
+  };
+}
+
+export type DocumentView = "proforma" | "receipt" | "invoice";
+
+export function resolveDocumentView(invoice: InvoiceRow, requested?: string | null): DocumentView {
+  const q = (requested ?? "").toLowerCase();
+  if (invoice.document_type === "proforma_invoice") {
+    return "proforma";
+  }
+  if (q === "proforma") return "proforma";
+  if (q === "invoice") return "invoice";
+  return "receipt";
+}
+
+export function renderInvoiceDocument(
+  invoice: InvoiceRow,
+  buyerEmail?: string | null,
+  view?: DocumentView,
+): string {
+  const resolved = view ?? resolveDocumentView(invoice);
+  if (resolved === "receipt") {
+    return renderPaymentReceiptHtml(invoiceToReceiptModel(invoice, buyerEmail));
+  }
+  // Proforma view of a finalized tax invoice: temporarily present as proforma layout
+  if (resolved === "proforma" && invoice.document_type === "tax_invoice") {
+    return renderInvoiceHtml(
+      invoiceToRenderModel({ ...invoice, document_type: "proforma_invoice", status: "paid" }, buyerEmail),
+    );
+  }
   return renderInvoiceHtml(invoiceToRenderModel(invoice, buyerEmail));
+}
+
+/**
+ * Issue a billing document for a successful payment.
+ * If an open INV proforma exists for renews_period_id, finalize that row (attach RCP).
+ * Otherwise allocate a new INV+RCP via fn_issue_invoice (initial / early renew).
+ * Always closes any leftover open proforma so the hub never keeps "Payment due".
+ */
+export async function issueDocumentForPayment(args: {
+  paymentId: string;
+  userId: string;
+  packSnapshot: PackSnapshotRow;
+  paymentSnapshot: Record<string, unknown>;
+  renewsPeriodId?: string | null;
+  buyerEmail?: string | null;
+  log?: { warn: (obj: unknown, msg?: string) => void; error: (obj: unknown, msg?: string) => void };
+}): Promise<{ invoiceId: string } | { skipped: true; reason: string }> {
+  // Idempotent: payment already has a tax invoice — still close any orphan PI.
+  const { data: existing } = await supabaseAdmin
+    .from("invoices")
+    .select("id")
+    .eq("payment_id", args.paymentId)
+    .eq("document_type", "tax_invoice")
+    .maybeSingle();
+  if (existing?.id) {
+    if (args.renewsPeriodId) {
+      await closeOpenProformaForPeriod({
+        periodId: args.renewsPeriodId,
+        taxInvoiceId: existing.id as string,
+        log: args.log,
+      });
+    }
+    return { invoiceId: existing.id as string };
+  }
+
+  if (args.renewsPeriodId) {
+    const proformaId = await findOpenProformaIdForPeriod(args.renewsPeriodId);
+    if (proformaId) {
+      // Plan switch: do not turn an old-plan proforma into the paid tax invoice.
+      const matches = await openProformaMatchesPayment({
+        proformaId,
+        packSnapshot: args.packSnapshot,
+      });
+      if (!matches) {
+        args.log?.warn(
+          { proformaId, paymentId: args.paymentId },
+          "open proforma does not match payment — issuing fresh tax invoice",
+        );
+        const issued = await issueInvoiceForPayment(args);
+        if ("invoiceId" in issued) {
+          await supersedeOpenProforma({
+            proformaId,
+            taxInvoiceId: issued.invoiceId,
+            log: args.log,
+          });
+        }
+        return issued;
+      }
+
+      const finalized = await finalizeProformaPayment({
+        proformaId,
+        paymentId: args.paymentId,
+        paymentSnapshot: args.paymentSnapshot,
+        log: args.log,
+      });
+      if ("invoiceId" in finalized) {
+        // Finalize may have returned an already-issued INV for this payment (race).
+        // Ensure the open PI is not left as Payment due.
+        if (finalized.invoiceId !== proformaId) {
+          await supersedeOpenProforma({
+            proformaId,
+            taxInvoiceId: finalized.invoiceId,
+            log: args.log,
+          });
+        }
+        return finalized;
+      }
+
+      // RPC missing / failed — issue a separate tax invoice, then void the PI.
+      args.log?.warn(
+        { proformaId, paymentId: args.paymentId, reason: finalized.reason },
+        "finalize failed; issuing tax invoice and superseding proforma",
+      );
+      const issued = await issueInvoiceForPayment(args);
+      if ("invoiceId" in issued) {
+        await supersedeOpenProforma({
+          proformaId,
+          taxInvoiceId: issued.invoiceId,
+          log: args.log,
+        });
+      }
+      return issued;
+    }
+  }
+
+  return issueInvoiceForPayment(args);
 }
 
 /**
@@ -358,15 +551,48 @@ export async function issueInvoiceForPayment(args: {
     return { skipped: true, reason: error?.message ?? "fn_issue_invoice returned no id" };
   }
 
+  // Mark as paid (fn_issue_invoice historically used status issued)
+  const { error: paidError } = await supabaseAdmin
+    .from("invoices")
+    .update({ status: "paid", updated_at: new Date().toISOString() })
+    .eq("id", invoiceId)
+    .eq("document_type", "tax_invoice");
+
+  if (paidError) {
+    args.log?.error(
+      { err: paidError, invoiceId, paymentId: args.paymentId },
+      "failed to mark invoice as paid",
+    );
+  }
+
   return { invoiceId: invoiceId as string };
 }
 
-export async function ensureInvoicePdf(invoice: InvoiceRow): Promise<{ path: string; sha256: string }> {
-  // Always re-render and upsert. Invoice downloads are rare; this keeps PDF
-  // layout fixes (column spacing, etc.) visible without a manual cache clear.
-  const pdf = await renderInvoicePdf(invoiceToRenderModel(invoice));
+export async function ensureInvoicePdf(
+  invoice: InvoiceRow,
+  view?: DocumentView,
+): Promise<{ path: string; sha256: string; filename: string }> {
+  const resolved = view ?? resolveDocumentView(invoice);
+  let pdf: Buffer;
+  let filename: string;
+
+  if (resolved === "receipt") {
+    pdf = await renderPaymentReceiptPdf(invoiceToReceiptModel(invoice));
+    filename = `${invoice.receipt_number ?? invoice.invoice_number}-receipt.pdf`;
+  } else if (resolved === "proforma") {
+    const model =
+      invoice.document_type === "tax_invoice"
+        ? invoiceToRenderModel({ ...invoice, document_type: "proforma_invoice", status: "paid" })
+        : invoiceToRenderModel(invoice);
+    pdf = await renderInvoicePdf(model);
+    filename = `${invoice.invoice_number}-proforma.pdf`;
+  } else {
+    pdf = await renderInvoicePdf(invoiceToRenderModel(invoice));
+    filename = `${invoice.invoice_number}.pdf`;
+  }
+
   const sha256 = createHash("sha256").update(pdf).digest("hex");
-  const path = `${invoice.user_id}/${invoice.financial_year}/${invoice.invoice_number}.pdf`;
+  const path = `${invoice.user_id}/${invoice.financial_year}/${filename}`;
 
   const { error: uploadError } = await supabaseAdmin.storage.from("invoices").upload(path, pdf, {
     contentType: "application/pdf",
@@ -376,14 +602,16 @@ export async function ensureInvoicePdf(invoice: InvoiceRow): Promise<{ path: str
     throw new Error(`Failed to store invoice PDF: ${uploadError.message}`);
   }
 
-  const { error: updateError } = await supabaseAdmin
-    .from("invoices")
-    .update({ pdf_storage_path: path, pdf_sha256: sha256, updated_at: new Date().toISOString() })
-    .eq("id", invoice.id);
-
-  if (updateError) {
-    throw new Error(`Failed to record PDF path: ${updateError.message}`);
+  // Only cache default path on the row for the primary paid receipt / unpaid proforma
+  if (
+    (resolved === "receipt" && invoice.document_type === "tax_invoice") ||
+    (resolved === "proforma" && invoice.document_type === "proforma_invoice")
+  ) {
+    await supabaseAdmin
+      .from("invoices")
+      .update({ pdf_storage_path: path, pdf_sha256: sha256, updated_at: new Date().toISOString() })
+      .eq("id", invoice.id);
   }
 
-  return { path, sha256 };
+  return { path, sha256, filename };
 }

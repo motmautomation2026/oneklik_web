@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { normalizePerson, type Person } from "../lib/revealFlow.js";
+import { ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
 
 const router = Router();
 
@@ -25,6 +26,7 @@ router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (r
   }
 
   const userId = req.user!.id;
+  await ensureSubscriptionCreditState(userId, req.log);
 
   // The lookup itself is free, but a zero balance still shouldn't be able to
   // hit the webhook for free indefinitely — that costs you (n8n/scraping

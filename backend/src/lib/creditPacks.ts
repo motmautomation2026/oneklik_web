@@ -22,7 +22,7 @@ export interface CreditPack {
 export const CREDIT_PACKS: CreditPack[] = [
   {
     id: "starter",
-    name: "Starter Credits Pack",
+    name: "Starter Monthly",
     credits: 4000,
     priceMinorUnits: 600_000, // ₹6,000.00
     currency: "INR",
@@ -33,7 +33,7 @@ export const CREDIT_PACKS: CreditPack[] = [
   },
   {
     id: "growth",
-    name: "Growth Credits Pack",
+    name: "Growth Monthly",
     credits: 12000,
     priceMinorUnits: 1_700_000, // ₹17,000.00
     currency: "INR",
@@ -44,7 +44,7 @@ export const CREDIT_PACKS: CreditPack[] = [
   },
   {
     id: "business",
-    name: "Business Credits Pack",
+    name: "Business Monthly",
     credits: 20000,
     priceMinorUnits: 2_800_000, // ₹28,000.00
     currency: "INR",

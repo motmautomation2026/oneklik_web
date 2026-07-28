@@ -18,6 +18,8 @@ import razorpayWebhookRouter from "./routes/razorpayWebhook.js";
 import paymentsCheckoutRouter from "./routes/paymentsCheckout.js";
 import billingProfileRouter from "./routes/billingProfile.js";
 import invoicesRouter from "./routes/invoices.js";
+import billingTickRouter from "./routes/billingTick.js";
+import billingSubscriptionRouter from "./routes/billingSubscription.js";
 import supportRouter from "./support/routes.js";
 import adminRouter from "./admin/routes.js";
 
@@ -52,6 +54,8 @@ app.use("/api", mergeListsRouter);
 app.use("/api", paymentsCheckoutRouter);
 app.use("/api", billingProfileRouter);
 app.use("/api", invoicesRouter);
+app.use("/api", billingTickRouter);
+app.use("/api", billingSubscriptionRouter);
 // Authenticated but NOT account-status gated — a frozen, suspended or banned
 // user has to be able to raise and read a support ticket. See the comment at
 // the top of support/routes.ts before adding any middleware here.

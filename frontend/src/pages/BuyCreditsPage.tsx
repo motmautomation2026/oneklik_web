@@ -64,13 +64,19 @@ const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
   business: { label: "Business", bestFor: "Growing businesses" },
 };
 
+const PLAN_BILLING_POINTS = [
+  "Billed monthly",
+  "Credits after payment confirmation",
+  "Rollover on renew or upgrade — not on downgrade",
+  "2-day buffer after the due date",
+];
+
 const PLAN_FEATURES = [
   "Company & People Search",
   "Email & Phone Reveal",
   "LinkedIn Lookup",
   "AI-powered search",
   "Save to Lists & export",
-  "Credits Roll Over",
 ];
 
 function loadRazorpayScript(): Promise<void> {
@@ -102,6 +108,14 @@ export default function BuyCreditsPage() {
   const [showBillingModal, setShowBillingModal] = useState(false);
   const [pendingPack, setPendingPack] = useState<CreditPack | null>(null);
   const [emailCopied, setEmailCopied] = useState(false);
+  const [subscription, setSubscription] = useState<{
+    plan_id: string;
+    status: string;
+    current_period_end: string;
+    grace_ends_at: string;
+    pending_plan_id: string | null;
+    proforma: { id: string; invoice_number: string; status: string; due_date: string | null } | null;
+  } | null>(null);
 
   async function handleCopyEmail() {
     try {
@@ -117,11 +131,22 @@ export default function BuyCreditsPage() {
     Promise.all([
       apiGet<{ packs: CreditPack[] }>("/api/payments/packs"),
       apiGet<{ profile: BillingProfile | null; complete: boolean }>("/api/billing/profile"),
+      apiGet<{
+        subscription: {
+          plan_id: string;
+          status: string;
+          current_period_end: string;
+          grace_ends_at: string;
+          pending_plan_id: string | null;
+          proforma: { id: string; invoice_number: string; status: string; due_date: string | null } | null;
+        } | null;
+      }>("/api/billing/subscription").catch(() => ({ subscription: null })),
     ])
-      .then(([packsRes, billingRes]) => {
+      .then(([packsRes, billingRes, subRes]) => {
         setPacks(packsRes.packs);
         setBillingComplete(billingRes.complete);
         setBillingProfile(billingRes.profile);
+        setSubscription(subRes.subscription);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load credit packs"))
       .finally(() => setLoadingPacks(false));
@@ -149,7 +174,7 @@ export default function BuyCreditsPage() {
       }
     }
     setPolling(false);
-    setError("Still waiting on confirmation from the payment gateway — check Payments shortly.");
+    setError("Still waiting on confirmation from the payment gateway — check Billing shortly.");
   }
 
   async function startCheckout(pack: CreditPack) {
@@ -210,7 +235,73 @@ export default function BuyCreditsPage() {
   return (
     <AppLayout>
       <Container fluid className="py-4 px-3 px-md-4">
-        <h1 className="h4 mb-4 text-primary">Buy Credits</h1>
+        <h1 className="h4 mb-4 text-primary">Monthly Plans</h1>
+
+        {subscription && (
+          <Alert
+            variant={subscription.status === "past_due" || subscription.status === "expired" ? "danger" : "info"}
+            className="mb-4"
+          >
+            <div className="d-flex flex-wrap align-items-start justify-content-between gap-3">
+              <div>
+                <div className="fw-semibold mb-1">
+                  Current plan: {PLAN_INFO[subscription.plan_id]?.label ?? subscription.plan_id}{" "}
+                  <Badge
+                    bg={
+                      subscription.status === "past_due" || subscription.status === "expired"
+                        ? "danger"
+                        : "secondary"
+                    }
+                    className="ms-1"
+                  >
+                    {subscription.status}
+                  </Badge>
+                </div>
+                <div className="small">
+                  Period ends {new Date(subscription.current_period_end).toLocaleDateString("en-IN")} · Buffer until{" "}
+                  {new Date(subscription.grace_ends_at).toLocaleDateString("en-IN")}
+                  {subscription.proforma ? (
+                    <>
+                      {" "}
+                      · Pro forma {subscription.proforma.invoice_number} ({subscription.proforma.status})
+                    </>
+                  ) : null}
+                </div>
+                <div className="small text-body-secondary mt-1">
+                  {subscription.status === "past_due" || subscription.status === "expired"
+                    ? "Renew your plan below to continue. Same plan or upgrade keeps leftover credits; downgrade does not."
+                    : "Choose a plan below to renew. Same plan or upgrade keeps leftover credits; downgrade does not."}
+                </div>
+              </div>
+              {(subscription.status === "past_due" ||
+                subscription.status === "expired" ||
+                subscription.proforma?.status === "issued") && (
+                <div className="d-flex flex-wrap gap-2">
+                  {subscription.proforma?.id && (
+                    <Link
+                      to={`/billing/documents/${subscription.proforma.id}`}
+                      className="btn btn-sm btn-outline-dark"
+                    >
+                      View pro forma
+                    </Link>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="dark"
+                    disabled={buyingPackId !== null || polling || packs.length === 0}
+                    onClick={() => {
+                      const pack = packs.find((p) => p.id === (subscription.pending_plan_id || subscription.plan_id));
+                      if (pack) handleBuy(pack);
+                      else setError("Could not find your plan to renew — pick a plan card below.");
+                    }}
+                  >
+                    Pay now — renew
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Alert>
+        )}
 
         {error && (
           <Alert variant="danger" dismissible onClose={() => setError(null)}>
@@ -223,7 +314,7 @@ export default function BuyCreditsPage() {
             {result.invoiceId ? (
               <>
                 {" "}
-                Your receipt is ready in <Link to="/payments">Payments</Link>.
+                Your receipt is ready in <Link to="/billing">Billing</Link>.
               </>
             ) : (
               ""
@@ -270,11 +361,9 @@ export default function BuyCreditsPage() {
                             </Badge>
                           )}
                           <h2 className="h5">{pack.credits.toLocaleString()} credits</h2>
-                          <p className="text-body-secondary small flex-grow-1">
-                            One-time purchase. GST is added at checkout; credits appear after payment
-                            confirmation.
-                            {info && <> Best for {info.bestFor.toLowerCase()}.</>}
-                          </p>
+                          {info && (
+                            <p className="text-body-secondary small mb-2">Best for {info.bestFor.toLowerCase()}.</p>
+                          )}
                           <div className="mb-3">
                             <div className="h3 mb-1 d-flex align-items-center gap-2">
                               {formatMoney(pack.price_minor_units, pack.currency)}
@@ -298,10 +387,10 @@ export default function BuyCreditsPage() {
                               + {taxPercentLabel(pack.tax_rate_bps)} GST
                             </div>
                           </div>
-                          <ul className="list-unstyled small mb-3">
-                            {PLAN_FEATURES.map((feature) => (
-                              <li key={feature} className="d-flex align-items-center gap-2 mb-1">
-                                <CheckCircleFill className="text-primary flex-shrink-0" size={14} />
+                          <ul className="list-unstyled small mb-3 flex-grow-1">
+                            {[...PLAN_BILLING_POINTS, ...PLAN_FEATURES].map((feature) => (
+                              <li key={feature} className="d-flex align-items-start gap-2 mb-1">
+                                <CheckCircleFill className="text-primary flex-shrink-0 mt-1" size={14} />
                                 <span>{feature}</span>
                               </li>
                             ))}
@@ -317,8 +406,10 @@ export default function BuyCreditsPage() {
                                 <Spinner animation="border" size="sm" className="me-2" />
                                 Opening checkout…
                               </>
+                            ) : subscription ? (
+                              subscription.plan_id === pack.id ? "Renew plan" : "Switch & pay"
                             ) : (
-                              "Buy Now"
+                              "Subscribe"
                             )}
                           </Button>
                         </>

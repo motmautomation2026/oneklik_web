@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { supabaseAdmin } from "./supabaseAdmin.js";
+import { ensureSubscriptionCreditState } from "./ensureSubscription.js";
 
 const MAX_ROWS_PER_REQUEST = 50;
 
@@ -96,6 +97,8 @@ async function holdCallResolve(
   items: ListItemRef[],
   config: RevealConfig,
 ): Promise<CoreResult> {
+  await ensureSubscriptionCreditState(userId, req.log);
+
   const { data: wallet } = await supabaseAdmin
     .from("credit_wallets")
     .select("available_balance")

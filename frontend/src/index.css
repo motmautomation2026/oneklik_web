@@ -334,6 +334,9 @@ label.text-uppercase,
 }
 
 .app-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   color: #fff;
   font-weight: 700;
   text-decoration: none;
@@ -341,8 +344,12 @@ label.text-uppercase,
   font-size: 1.05rem;
 }
 
-.app-sidebar-brand-short {
-  display: none;
+.app-sidebar-brand-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: cover;
 }
 
 .app-sidebar-toggle {
@@ -498,10 +505,6 @@ label.text-uppercase,
   .app-sidebar.collapsed .app-sidebar-group-label,
   .app-sidebar.collapsed .app-sidebar-brand-full {
     display: none;
-  }
-
-  .app-sidebar.collapsed .app-sidebar-brand-short {
-    display: inline;
   }
 }
 
@@ -845,13 +848,8 @@ label.text-uppercase,
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.16);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .auth-visual-headline {

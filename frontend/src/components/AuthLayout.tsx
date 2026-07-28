@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { CheckCircleFill } from "react-bootstrap-icons";
+import logo from "../assets/oneklik_logo_small.png";
 
 const FEATURES = [
   "Verified company & people data",
@@ -12,7 +13,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
     <div className="auth-shell">
       <div className="auth-visual">
         <div className="auth-visual-brand">
-          <span className="auth-visual-logo">OK</span>
+          <img src={logo} alt="" className="auth-visual-logo" />
           One-Klik
         </div>
 

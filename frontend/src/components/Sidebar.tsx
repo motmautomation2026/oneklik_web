@@ -14,6 +14,7 @@ import {
   X,
 } from "react-bootstrap-icons";
 import { useAuth } from "../lib/AuthProvider";
+import logo from "../assets/oneklik_logo_small.png";
 
 interface NavItem {
   to: string;
@@ -58,8 +59,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
       <aside className={`app-sidebar${collapsed ? " collapsed" : ""}${mobileOpen ? " mobile-open" : ""}`}>
         <div className="app-sidebar-header">
           <Link to="/dashboard" className="app-sidebar-brand" onClick={onClose}>
+            <img src={logo} alt="" className="app-sidebar-brand-logo" />
             <span className="app-sidebar-brand-full">One-Klik</span>
-            <span className="app-sidebar-brand-short">OK</span>
           </Link>
           <button
             type="button"

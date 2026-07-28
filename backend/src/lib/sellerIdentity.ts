@@ -1,10 +1,8 @@
 /**
  * Hardcoded seller identity for GST tax invoices.
  *
- * Note: GSTIN 27AWYPK0264G1Z6 is registered in Maharashtra (27). The business
- * address below is in Andhra Pradesh. Tax CGST/SGST vs IGST uses the GSTIN
- * state code (27). The printed address lines use the address as provided.
- * Confirm with your CA if the registration state should be updated.
+ * GSTIN 27AWYPK0264G1Z6 is registered in Maharashtra (27) — checksum-verified.
+ * Address below is the Pune (Wagholi) registered address, matching that state.
  */
 export interface SellerSnapshot {
   legal_name: string;
@@ -24,13 +22,13 @@ export interface SellerSnapshot {
 const HARDCODED_SELLER: SellerSnapshot = {
   legal_name: "One-Klik",
   gstin: "27AWYPK0264G1Z6",
-  address_line1: "DOOR NO 22-6-280 BHARATHPET 6TH LINE, WARD-43 VILLAGE GUNTUR MANDAL, GUNTUR DISTRICT",
-  address_line2: "GUNTUR, Andhra Pradesh, 522002",
-  city: "GUNTUR",
+  address_line1: "FIRST FLOOR, Reality Warehousing Pvt Ltd, GAT NO.-1337/1, Pune Nagar Road",
+  address_line2: "Above Reliance Smart, Wagholi, Pune",
+  city: "Pune",
   // Tax place-of-supply / CGST-SGST vs IGST follows the GSTIN registration state.
   state_code: "27",
   state_name: "Maharashtra",
-  postal_code: "522002",
+  postal_code: "412207",
   country: "IN",
   billing_email: "billing@oneklik.demo",
   phone: "+91 99999 00000",

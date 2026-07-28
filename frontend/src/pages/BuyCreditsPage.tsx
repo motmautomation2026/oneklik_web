@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -219,7 +220,14 @@ export default function BuyCreditsPage() {
         {result && (
           <Alert variant="success" dismissible onClose={() => setResult(null)}>
             Payment confirmed — {result.credits.toLocaleString()} credits added to your account.
-            {result.invoiceId ? " Your receipt is ready in Payments." : ""}
+            {result.invoiceId ? (
+              <>
+                {" "}
+                Your receipt is ready in <Link to="/payments">Payments</Link>.
+              </>
+            ) : (
+              ""
+            )}
           </Alert>
         )}
         {polling && (

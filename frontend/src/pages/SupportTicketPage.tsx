@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Badge, Button, Card, Form, Spinner } from "react-bootstrap";
+import { ArrowLeft } from "react-bootstrap-icons";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import SupportLayout from "../components/SupportLayout";
 import { useAuth } from "../lib/AuthProvider";
@@ -157,8 +158,9 @@ export default function SupportTicketPage() {
     <SupportLayout>
       <div className="p-md-4 p-3">
         <div className="mb-3">
-          <Link to="/support" className="small">
-            ← All requests
+          <Link to="/support" className="ticket-back-link">
+            <ArrowLeft size={14} />
+            All requests
           </Link>
         </div>
 

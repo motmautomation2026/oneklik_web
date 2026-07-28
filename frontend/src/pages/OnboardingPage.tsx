@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Card, Container, Form } from "react-bootstrap";
+import { Alert, Button, Card, Form } from "react-bootstrap";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
+import AuthLayout from "../components/AuthLayout";
 
 const USE_CASES = ["Sales prospecting", "Recruiting", "Marketing / demand gen", "Investment research", "Other"];
 
@@ -41,11 +42,11 @@ export default function OnboardingPage() {
   }
 
   return (
-    <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+    <AuthLayout>
       <Card style={{ maxWidth: 460, width: "100%" }} className="p-4 shadow-sm">
         <Card.Body>
           <h1 className="h4 mb-1">Tell us about you</h1>
-          <p className="text-body-secondary small mb-3">One quick step before your dashboard.</p>
+          <p className="text-body-secondary small mb-4">One quick step before your dashboard.</p>
           {error && <Alert variant="danger">{error}</Alert>}
           <Form onSubmit={handleSubmit}>
             <Form.Group className="mb-3" controlId="onboardingCompany">
@@ -72,6 +73,6 @@ export default function OnboardingPage() {
           </Form>
         </Card.Body>
       </Card>
-    </Container>
+    </AuthLayout>
   );
 }

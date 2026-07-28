@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Card, Form, Spinner } from "react-bootstrap";
+import { ArrowLeft } from "react-bootstrap-icons";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import SupportLayout from "../components/SupportLayout";
 import { useAuth } from "../lib/AuthProvider";
@@ -101,7 +102,8 @@ export default function NewTicketPage() {
         <div className="ticket-form-page">
           <div className="mb-3">
             <Link to="/support" className="ticket-back-link">
-              ← All requests
+              <ArrowLeft size={14} />
+              All requests
             </Link>
           </div>
 

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Alert, Badge, Button, Card, Col, Container, Form, Modal, Row, Spinner } from "react-bootstrap";
+import { Linkedin } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import TagInput from "../components/TagInput";
 import { apiPost } from "../lib/api";
@@ -197,7 +198,10 @@ export default function LinkedInLookupPage() {
                 )}
 
                 {!hasSearched && !loading && (
-                  <p className="text-body-secondary">Paste one or more LinkedIn URLs and click Search.</p>
+                  <div className="text-center text-body-secondary py-5">
+                    <Linkedin size={28} className="mb-2 opacity-50" />
+                    <p className="mb-0">Paste one or more LinkedIn URLs and click Search.</p>
+                  </div>
                 )}
 
                 {loading && (

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Card, Container, Form } from "react-bootstrap";
+import { Alert, Button, Card, Form } from "react-bootstrap";
 import { supabase } from "../lib/supabaseClient";
 import { authErrorMessage } from "../lib/authErrorMessage";
+import AuthLayout from "../components/AuthLayout";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -45,7 +46,7 @@ export default function LoginPage() {
   }
 
   return (
-    <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+    <AuthLayout>
       <Card style={{ maxWidth: 420, width: "100%" }} className="p-4 shadow-sm">
         <Card.Body>
           <h1 className="h4 mb-3">Log in</h1>
@@ -88,6 +89,6 @@ export default function LoginPage() {
           </p>
         </Card.Body>
       </Card>
-    </Container>
+    </AuthLayout>
   );
 }

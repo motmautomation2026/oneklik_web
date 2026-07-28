@@ -11,7 +11,7 @@ type PaymentStatus = "initiated" | "pending" | "success" | "failed";
 
 interface PaymentRow {
   id: string;
-  gateway: "razorpay" | "stripe";
+  gateway: "razorpay";
   gateway_payment_id: string | null;
   status: PaymentStatus;
   credits_promised: number;
@@ -52,7 +52,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "failed", label: "Failed" },
 ];
 
-export default function PaymentsPage() {
+export default function () {
   const { user } = useAuth();
   const [rows, setRows] = useState<PaymentRow[]>([]);
   const [page, setPage] = useState(0);

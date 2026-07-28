@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Alert, Button, Card, Container, Form } from "react-bootstrap";
+import { Alert, Button, Card, Form } from "react-bootstrap";
 import { supabase } from "../lib/supabaseClient";
 import { authErrorMessage } from "../lib/authErrorMessage";
+import AuthLayout from "../components/AuthLayout";
 
 const RESEND_COOLDOWN_SECONDS = 60;
 
@@ -105,7 +106,7 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}>
+    <AuthLayout>
       <Card style={{ maxWidth: 420, width: "100%" }} className="p-4 shadow-sm">
         <Card.Body>
           <h1 className="h4 mb-3">Set a new password</h1>
@@ -193,6 +194,6 @@ export default function ResetPasswordPage() {
           </p>
         </Card.Body>
       </Card>
-    </Container>
+    </AuthLayout>
   );
 }

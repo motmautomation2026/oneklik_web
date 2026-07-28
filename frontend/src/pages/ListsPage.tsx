@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Form, Modal, Spinner } from "react-bootstrap";
+import { ListUl } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import PaginationBar from "../components/PaginationBar";
 import { supabase } from "../lib/supabaseClient";
@@ -170,9 +171,12 @@ export default function ListsPage() {
             )}
 
             {!loading && lists.length === 0 && (
-              <p className="text-body-secondary mb-0">
-                No lists yet — saving results from Company Search, People Search, or a Reveal action creates one.
-              </p>
+              <div className="text-center text-body-secondary py-5">
+                <ListUl size={28} className="mb-2 opacity-50" />
+                <p className="mb-0">
+                  No lists yet — saving results from Company Search, People Search, or a Reveal action creates one.
+                </p>
+              </div>
             )}
 
             {!loading && lists.length > 0 && (

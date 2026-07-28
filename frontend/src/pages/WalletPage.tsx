@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Alert, Badge, Button, ButtonGroup, Card, Col, Container, ProgressBar, Row, Spinner, Table } from "react-bootstrap";
+import { CreditCard } from "react-bootstrap-icons";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/AuthProvider";
 import { supabase } from "../lib/supabaseClient";
@@ -157,7 +158,8 @@ export default function WalletPage() {
       <Container fluid className="py-4 px-3 px-md-4">
         <div className="d-flex align-items-center justify-content-between mb-4">
           <h1 className="h4 mb-0 text-primary">Wallet</h1>
-          <Link to="/buy-credits" className="btn btn-primary btn-sm">
+          <Link to="/buy-credits" className="btn btn-primary btn-sm d-inline-flex align-items-center gap-2">
+            <CreditCard size={16} />
             Buy Credits
           </Link>
         </div>

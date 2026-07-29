@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import { CREDIT_PACKS, findPack } from "../lib/creditPacks.js";
 import type { InvoiceRow } from "../lib/issueInvoice.js";
+import { ExportTooLargeError, MAX_EXPORT_ROWS } from "./exportLimits.js";
 import type {
   AdminBillingProfileSummary,
   AdminInvoiceListRow,
@@ -185,8 +186,9 @@ export async function fetchUserBillingBundle(userId: string): Promise<{
   subscription: AdminSubscriptionSummary | null;
   billing_profile: AdminBillingProfileSummary | null;
   invoices: AdminInvoiceRow[];
+  invoices_total: number;
 }> {
-  const [subResult, profileResult, invoiceResult] = await Promise.all([
+  const [subResult, profileResult, invoiceResult, invoicesTotalResult] = await Promise.all([
     supabaseAdmin.from("subscriptions").select(SUBSCRIPTION_SELECT).eq("user_id", userId).maybeSingle(),
     supabaseAdmin.from("billing_profiles").select(BILLING_PROFILE_SELECT).eq("user_id", userId).maybeSingle(),
     supabaseAdmin
@@ -194,12 +196,17 @@ export async function fetchUserBillingBundle(userId: string): Promise<{
       .select(INVOICE_LIST_SELECT)
       .eq("user_id", userId)
       .order("issued_at", { ascending: false })
-      .limit(50),
+      .limit(20),
+    supabaseAdmin
+      .from("invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId),
   ]);
 
   if (subResult.error) throw subResult.error;
   if (profileResult.error) throw profileResult.error;
   if (invoiceResult.error) throw invoiceResult.error;
+  if (invoicesTotalResult.error) throw invoicesTotalResult.error;
 
   let subscription: AdminSubscriptionSummary | null = null;
   const rawSub = subResult.data as RawSubscriptionRow | null;
@@ -228,16 +235,17 @@ export async function fetchUserBillingBundle(userId: string): Promise<{
       ? toBillingProfileSummary(profileResult.data as Parameters<typeof toBillingProfileSummary>[0])
       : null,
     invoices: ((invoiceResult.data ?? []) as Parameters<typeof toAdminInvoiceRow>[0][]).map(toAdminInvoiceRow),
+    invoices_total: invoicesTotalResult.count ?? 0,
   };
 }
 
 async function attachEmails<T extends { user_id: string }>(rows: T[]): Promise<(T & { email: string | null })[]> {
-  return Promise.all(
-    rows.map(async (row) => {
-      const { data } = await supabaseAdmin.auth.admin.getUserById(row.user_id);
-      return { ...row, email: data.user?.email ?? null };
-    }),
-  );
+  if (rows.length === 0) return [];
+  const ids = [...new Set(rows.map((r) => r.user_id))];
+  const { data, error } = await supabaseAdmin.from("profiles").select("id, email").in("id", ids);
+  if (error) throw error;
+  const emailById = new Map((data ?? []).map((r) => [r.id as string, (r.email as string | null) ?? null]));
+  return rows.map((row) => ({ ...row, email: emailById.get(row.user_id) ?? null }));
 }
 
 async function findUserIdsByEmailSubstring(term: string): Promise<Set<string>> {
@@ -245,15 +253,13 @@ async function findUserIdsByEmailSubstring(term: string): Promise<Set<string>> {
   const ids = new Set<string>();
   if (!needle) return ids;
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PAGE_SIZE });
-    if (error) throw error;
-    const users = "users" in data ? data.users : [];
-    for (const user of users) {
-      if (user.email?.toLowerCase().includes(needle)) ids.add(user.id);
-    }
-    if (users.length < PAGE_SIZE) break;
-  }
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .ilike("email", `%${needle}%`)
+    .range(0, PAGE_SIZE - 1);
+  if (error) throw error;
+  for (const row of (data ?? []) as { id: string }[]) ids.add(row.id);
   return ids;
 }
 
@@ -368,49 +374,45 @@ export async function getSubscriptions({
 }
 
 export async function getSubscriptionsKpis(): Promise<SubscriptionsKpis> {
-  const now = new Date();
-  const all: RawSubscriptionRow[] = [];
-  let from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin
-      .from("subscriptions")
-      .select(SUBSCRIPTION_SELECT)
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as RawSubscriptionRow[];
-    if (rows.length === 0) break;
-    all.push(...rows);
-    if (rows.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  const { count: profileCount, error: profileCountError } = await supabaseAdmin
-    .from("profiles")
-    .select("id", { count: "exact", head: true });
+  const [{ data: statusRows, error: statusError }, { data: lapsingSoon, error: lapsingError }, { count: profileCount, error: profileCountError }] =
+    await Promise.all([
+      supabaseAdmin.rpc("fn_admin_subscription_status_counts"),
+      supabaseAdmin.rpc("fn_admin_lapsing_soon_count", { p_days: LAPSING_SOON_DAYS }),
+      supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }),
+    ]);
+  if (statusError) throw statusError;
+  if (lapsingError) throw lapsingError;
   if (profileCountError) throw profileCountError;
+
+  const rows = Array.isArray(statusRows)
+    ? (statusRows as { plan_id: string; status: SubscriptionStatus; count: number }[])
+    : typeof statusRows === "string"
+      ? (JSON.parse(statusRows) as { plan_id: string; status: SubscriptionStatus; count: number }[])
+      : [];
 
   let mrr = 0;
   let paying = 0;
   let pastDue = 0;
   let expired = 0;
   let cancelled = 0;
-  let lapsingSoon = 0;
+  let subscriptionRows = 0;
   const mixMap = new Map<string, { count: number; mrr_minor_units: number }>();
 
-  for (const row of all) {
+  for (const row of rows) {
+    const count = Number(row.count) || 0;
+    subscriptionRows += count;
     if (row.status === "active" || row.status === "past_due") {
-      paying += 1;
-      const taxable = packTaxableMinor(row.plan_id);
+      paying += count;
+      const taxable = packTaxableMinor(row.plan_id) * count;
       mrr += taxable;
       const mix = mixMap.get(row.plan_id) ?? { count: 0, mrr_minor_units: 0 };
-      mix.count += 1;
+      mix.count += count;
       mix.mrr_minor_units += taxable;
       mixMap.set(row.plan_id, mix);
     }
-    if (row.status === "past_due") pastDue += 1;
-    if (row.status === "expired") expired += 1;
-    if (row.status === "cancelled") cancelled += 1;
-    if (isLapsingSoon(row, now)) lapsingSoon += 1;
+    if (row.status === "past_due") pastDue += count;
+    if (row.status === "expired") expired += count;
+    if (row.status === "cancelled") cancelled += count;
   }
 
   const plan_mix: PlanMixEntry[] = Array.from(mixMap.entries())
@@ -430,8 +432,8 @@ export async function getSubscriptionsKpis(): Promise<SubscriptionsKpis> {
     past_due_count: pastDue,
     expired_count: expired,
     cancelled_count: cancelled,
-    no_subscription_count: Math.max(0, (profileCount ?? 0) - all.length),
-    lapsing_soon_count: lapsingSoon,
+    no_subscription_count: Math.max(0, (profileCount ?? 0) - subscriptionRows),
+    lapsing_soon_count: Number(lapsingSoon) || 0,
     plan_mix,
   };
 }
@@ -648,10 +650,21 @@ export async function getAllInvoicesForExport(
   params: Omit<GetInvoicesParams, "page" | "pageSize">,
 ): Promise<AdminInvoiceListRow[]> {
   const searchFilter = await resolveInvoicesSearchFilter(params.search);
+
+  const countQuery = await applyInvoiceDirectoryFilters(
+    supabaseAdmin.from("invoices").select("id", { count: "exact", head: true }),
+    params,
+    searchFilter,
+  );
+  const { count, error: countError } = await countQuery;
+  if (countError) throw countError;
+  if ((count ?? 0) > MAX_EXPORT_ROWS) throw new ExportTooLargeError(count ?? 0);
+
   const all: RawInvoiceDirectoryRow[] = [];
   let from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    let query = await applyInvoiceDirectoryFilters(
+  const total = count ?? 0;
+  while (from < total) {
+    const query = await applyInvoiceDirectoryFilters(
       supabaseAdmin
         .from("invoices")
         .select(INVOICE_DIRECTORY_SELECT)
@@ -675,126 +688,26 @@ export async function getAllInvoicesForExport(
   );
 }
 
-function monthStartIso(now = new Date()): string {
-  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-}
-
 export async function getInvoicesKpis(): Promise<InvoicesKpis> {
-  const mtdIso = monthStartIso();
-
-  const taxSelect =
-    "taxable_value_minor, cgst_minor, sgst_minor, igst_minor, total_minor, issued_at, document_type, status";
-
-  let taxableMtd = 0;
-  let cgstMtd = 0;
-  let sgstMtd = 0;
-  let igstMtd = 0;
-  let totalMtd = 0;
-  let taxCountMtd = 0;
-  let taxableAll = 0;
-  let gstAll = 0;
-  let totalAll = 0;
-  let taxCountAll = 0;
-  let openProformaCount = 0;
-  let openProformaTotal = 0;
-
-  let from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin
-      .from("invoices")
-      .select(taxSelect)
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as {
-      taxable_value_minor: number;
-      cgst_minor: number;
-      sgst_minor: number;
-      igst_minor: number;
-      total_minor: number;
-      issued_at: string;
-      document_type: string;
-      status: string;
-    }[];
-    if (rows.length === 0) break;
-
-    for (const row of rows) {
-      if (row.document_type === "tax_invoice" && row.status !== "cancelled" && row.status !== "void") {
-        taxCountAll += 1;
-        taxableAll += row.taxable_value_minor;
-        gstAll += row.cgst_minor + row.sgst_minor + row.igst_minor;
-        totalAll += row.total_minor;
-        if (row.issued_at >= mtdIso) {
-          taxCountMtd += 1;
-          taxableMtd += row.taxable_value_minor;
-          cgstMtd += row.cgst_minor;
-          sgstMtd += row.sgst_minor;
-          igstMtd += row.igst_minor;
-          totalMtd += row.total_minor;
-        }
-      }
-      if (row.document_type === "proforma_invoice" && row.status === "issued") {
-        openProformaCount += 1;
-        openProformaTotal += row.total_minor;
-      }
-    }
-
-    if (rows.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  // Success payments that never got a tax invoice — orphan / repair signal.
-  const invoicedPaymentIds = new Set<string>();
-  from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin
-      .from("invoices")
-      .select("payment_id")
-      .eq("document_type", "tax_invoice")
-      .not("payment_id", "is", null)
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as { payment_id: string | null }[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      if (row.payment_id) invoicedPaymentIds.add(row.payment_id);
-    }
-    if (rows.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  let successWithoutInvoice = 0;
-  from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin
-      .from("payments")
-      .select("id")
-      .eq("status", "success")
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as { id: string }[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      if (!invoicedPaymentIds.has(row.id)) successWithoutInvoice += 1;
-    }
-    if (rows.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
+  const { data, error } = await supabaseAdmin.rpc("fn_admin_invoices_kpis");
+  if (error) throw error;
+  const row = (data ?? {}) as Record<string, number | string>;
 
   return {
-    tax_invoice_count_mtd: taxCountMtd,
-    tax_invoice_count_all: taxCountAll,
-    taxable_minor_mtd: taxableMtd,
-    gst_minor_mtd: cgstMtd + sgstMtd + igstMtd,
-    total_minor_mtd: totalMtd,
-    cgst_minor_mtd: cgstMtd,
-    sgst_minor_mtd: sgstMtd,
-    igst_minor_mtd: igstMtd,
-    taxable_minor_all: taxableAll,
-    gst_minor_all: gstAll,
-    total_minor_all: totalAll,
-    open_proforma_count: openProformaCount,
-    open_proforma_total_minor: openProformaTotal,
-    success_without_invoice_count: successWithoutInvoice,
+    tax_invoice_count_mtd: Number(row.tax_invoice_count_mtd) || 0,
+    tax_invoice_count_all: Number(row.tax_invoice_count_all) || 0,
+    taxable_minor_mtd: Number(row.taxable_minor_mtd) || 0,
+    gst_minor_mtd: Number(row.gst_minor_mtd) || 0,
+    total_minor_mtd: Number(row.total_minor_mtd) || 0,
+    cgst_minor_mtd: Number(row.cgst_minor_mtd) || 0,
+    sgst_minor_mtd: Number(row.sgst_minor_mtd) || 0,
+    igst_minor_mtd: Number(row.igst_minor_mtd) || 0,
+    taxable_minor_all: Number(row.taxable_minor_all) || 0,
+    gst_minor_all: Number(row.gst_minor_all) || 0,
+    total_minor_all: Number(row.total_minor_all) || 0,
+    open_proforma_count: Number(row.open_proforma_count) || 0,
+    open_proforma_total_minor: Number(row.open_proforma_total_minor) || 0,
+    success_without_invoice_count: Number(row.success_payments_without_tax_invoice) || 0,
     currency: "INR",
   };
 }

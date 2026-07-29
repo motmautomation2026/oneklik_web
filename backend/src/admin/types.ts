@@ -204,6 +204,13 @@ export interface PaginatedLedger {
   page_size: number;
 }
 
+export interface PaginatedModerationActions {
+  rows: ModerationActionRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export type FlaggedStatus = "open" | "reviewed" | "dismissed";
 
 export interface FlaggedAccountRow {
@@ -363,8 +370,9 @@ export interface UserDetail {
   role: string | null;
   use_case: string | null;
   status_reason: string | null;
+  /** Open flags only (for review alerts); capped for safety. */
   flags: FlaggedAccountRow[];
-  moderation_actions: ModerationActionRow[];
+  flags_total: number;
   lists: { id: string; name: string; kind: string; created_at: string }[];
   lists_total: number;
   payments: PaymentRow[];
@@ -372,6 +380,7 @@ export interface UserDetail {
   subscription: AdminSubscriptionSummary | null;
   billing_profile: AdminBillingProfileSummary | null;
   invoices: AdminInvoiceRow[];
+  invoices_total: number;
 }
 
 export interface RunRow {

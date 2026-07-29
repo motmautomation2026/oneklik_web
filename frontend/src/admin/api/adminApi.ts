@@ -4,6 +4,8 @@ import type {
   AdminAccountRow,
   AdminOverview,
   AdminTicketDetail,
+  AdminTicketEvent,
+  AdminTicketMessage,
   PaginatedSupportTickets,
   SupportKpis,
   TicketCategory,
@@ -20,6 +22,7 @@ import type {
   PaginatedInvoices,
   PaginatedLedger,
   PaginatedLists,
+  PaginatedModerationActions,
   PaginatedRuns,
   PaginatedSubscriptions,
   PaginatedTransactions,
@@ -114,6 +117,16 @@ export function fetchUserLedger(
 ): Promise<PaginatedLedger> {
   const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
   return apiGet<PaginatedLedger>(`/api/admin/users/${encodeURIComponent(userId)}/ledger?${query.toString()}`);
+}
+
+export function fetchUserModeration(
+  userId: string,
+  params: { page: number; pageSize: number },
+): Promise<PaginatedModerationActions> {
+  const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+  return apiGet<PaginatedModerationActions>(
+    `/api/admin/users/${encodeURIComponent(userId)}/moderation?${query.toString()}`,
+  );
 }
 
 export interface GrantUserCreditsParams {
@@ -421,6 +434,28 @@ export function fetchSupportBadge(signal?: AbortSignal): Promise<{ count: number
 
 export function fetchSupportTicket(id: string, signal?: AbortSignal): Promise<{ ticket: AdminTicketDetail }> {
   return apiGet<{ ticket: AdminTicketDetail }>(`/api/admin/support/${id}`, signal);
+}
+
+export function fetchSupportTicketMessages(
+  id: string,
+  params: { before?: string; limit?: number },
+): Promise<{ messages: AdminTicketMessage[]; has_more: boolean }> {
+  const query = new URLSearchParams();
+  if (params.before) query.set("before", params.before);
+  if (params.limit != null) query.set("limit", String(params.limit));
+  const qs = query.toString();
+  return apiGet(`/api/admin/support/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchSupportTicketEvents(
+  id: string,
+  params: { before?: string; limit?: number },
+): Promise<{ events: AdminTicketEvent[]; has_more: boolean }> {
+  const query = new URLSearchParams();
+  if (params.before) query.set("before", params.before);
+  if (params.limit != null) query.set("limit", String(params.limit));
+  const qs = query.toString();
+  return apiGet(`/api/admin/support/${encodeURIComponent(id)}/events${qs ? `?${qs}` : ""}`);
 }
 
 export function postSupportMessage(id: string, body: string, internal: boolean): Promise<{ ok: true }> {

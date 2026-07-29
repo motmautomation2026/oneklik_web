@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Badge, Button, Form } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   exportTransactionsCsv,
   fetchTransactions,
@@ -29,9 +29,10 @@ const STATUS_OPTIONS: { value: PaymentStatus | ""; label: string }[] = [
 ];
 
 export default function AdminTransactionsPage() {
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<PaymentStatus | "">("");
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
   const search = useDebouncedValue(searchInput);
   const [exporting, setExporting] = useState(false);
   const [docBusyId, setDocBusyId] = useState<string | null>(null);

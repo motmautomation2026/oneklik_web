@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import {
   fetchUserDetail,
   fetchUserLedger,
+  fetchUserModeration,
   openAdminInvoiceHtml,
   reviewFlaggedAccount,
 } from "../api/adminApi";
@@ -28,12 +29,14 @@ import { ADMIN_CHART_COLORS } from "../theme";
 import type { AdminInvoiceRow, LedgerEntry, PaymentRow } from "../types";
 
 const LEDGER_PAGE_SIZE = 25;
+const MODERATION_PAGE_SIZE = 25;
 
 export default function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = id ?? "";
   const [refetchKey, setRefetchKey] = useState(0);
   const [ledgerPage, setLedgerPage] = useState(1);
+  const [moderationPage, setModerationPage] = useState(1);
   const [reviewingFlagId, setReviewingFlagId] = useState<string | null>(null);
   const [invoiceBusyId, setInvoiceBusyId] = useState<string | null>(null);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
@@ -42,6 +45,10 @@ export default function AdminUserDetailPage() {
   const ledger = useAdminResource(
     () => fetchUserLedger(userId, { page: ledgerPage, pageSize: LEDGER_PAGE_SIZE }),
     [userId, ledgerPage, refetchKey],
+  );
+  const moderation = useAdminResource(
+    () => fetchUserModeration(userId, { page: moderationPage, pageSize: MODERATION_PAGE_SIZE }),
+    [userId, moderationPage, refetchKey],
   );
 
   async function handleReview(flagId: string, status: "reviewed" | "dismissed") {
@@ -230,7 +237,6 @@ export default function AdminUserDetailPage() {
     use_case,
     status_reason,
     flags,
-    moderation_actions,
     lists,
     lists_total,
     payments,
@@ -238,8 +244,10 @@ export default function AdminUserDetailPage() {
     subscription,
     billing_profile,
     invoices,
+    invoices_total,
   } = detail.data;
-  const openFlags = flags.filter((f) => f.status === "open");
+  const openFlags = flags;
+  const emailSearch = user.email ? encodeURIComponent(user.email) : "";
 
   return (
     <>
@@ -305,8 +313,17 @@ export default function AdminUserDetailPage() {
       <ModerationPanel
         user={user}
         statusReason={status_reason}
-        moderationActions={moderation_actions}
-        onChanged={() => setRefetchKey((k) => k + 1)}
+        moderationActions={moderation.data?.rows ?? []}
+        moderationTotal={moderation.data?.total ?? 0}
+        moderationPage={moderationPage}
+        moderationPageSize={MODERATION_PAGE_SIZE}
+        moderationLoading={moderation.loading}
+        moderationError={moderation.error}
+        onModerationPageChange={setModerationPage}
+        onChanged={() => {
+          setModerationPage(1);
+          setRefetchKey((k) => k + 1);
+        }}
       />
 
       <div className="row g-3 mb-4">
@@ -415,7 +432,18 @@ export default function AdminUserDetailPage() {
 
       <div className="row g-3 mb-4">
         <div className="col-12">
-          <SectionCard title={`Invoices (${invoices.length})`} loading={false} error={null}>
+          <SectionCard
+            title={`Invoices (${invoices_total})`}
+            loading={false}
+            error={null}
+            action={
+              emailSearch ? (
+                <Link to={`/admin/invoices?search=${emailSearch}`} className="small">
+                  View all invoices &rarr;
+                </Link>
+              ) : undefined
+            }
+          >
             {invoiceError && (
               <Alert variant="danger" className="py-2 small" dismissible onClose={() => setInvoiceError(null)}>
                 {invoiceError}
@@ -427,6 +455,11 @@ export default function AdminUserDetailPage() {
               getRowKey={(row) => row.id}
               emptyMessage="No invoices yet"
             />
+            {invoices_total > invoices.length && (
+              <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                Showing latest {invoices.length} of {invoices_total}
+              </div>
+            )}
           </SectionCard>
         </div>
       </div>
@@ -465,7 +498,18 @@ export default function AdminUserDetailPage() {
           </SectionCard>
         </div>
         <div className="col-12 col-xl-6">
-          <SectionCard title={`Payments (${payments_total})`} loading={false} error={null}>
+          <SectionCard
+            title={`Payments (${payments_total})`}
+            loading={false}
+            error={null}
+            action={
+              emailSearch ? (
+                <Link to={`/admin/transactions?search=${emailSearch}`} className="small">
+                  View all payments &rarr;
+                </Link>
+              ) : undefined
+            }
+          >
             <DataTable
               columns={paymentColumns}
               rows={payments}

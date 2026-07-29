@@ -6,6 +6,7 @@ import { formatDateTime } from "../format";
 import { ADMIN_CHART_COLORS } from "../theme";
 import type { AccountStatus, AdminUserRow, ModerationAction, ModerationActionRow } from "../types";
 import DataTable from "./DataTable";
+import PaginationBar from "./PaginationBar";
 import SectionCard from "./SectionCard";
 
 // Which account_status each action moves the user into — used to decide which
@@ -59,12 +60,29 @@ interface ModerationPanelProps {
   user: AdminUserRow;
   statusReason: string | null;
   moderationActions: ModerationActionRow[];
+  moderationTotal: number;
+  moderationPage: number;
+  moderationPageSize: number;
+  moderationLoading: boolean;
+  moderationError: string | null;
+  onModerationPageChange: (page: number) => void;
   // Called after a successful status change so the parent can refetch the
   // user detail (status badge, reason, and history all update together).
   onChanged: () => void;
 }
 
-export default function ModerationPanel({ user, statusReason, moderationActions, onChanged }: ModerationPanelProps) {
+export default function ModerationPanel({
+  user,
+  statusReason,
+  moderationActions,
+  moderationTotal,
+  moderationPage,
+  moderationPageSize,
+  moderationLoading,
+  moderationError,
+  onModerationPageChange,
+  onChanged,
+}: ModerationPanelProps) {
   const status = user.account_status;
   const [pendingAction, setPendingAction] = useState<ModerationAction | null>(null);
   const [reason, setReason] = useState("");
@@ -202,12 +220,22 @@ export default function ModerationPanel({ user, statusReason, moderationActions,
 
       <div className="row g-3 mb-4">
         <div className="col-12">
-          <SectionCard title={`Moderation history (${moderationActions.length})`} loading={false} error={null}>
+          <SectionCard
+            title={`Moderation history (${moderationTotal})`}
+            loading={moderationLoading}
+            error={moderationError}
+          >
             <DataTable
               columns={historyColumns}
               rows={moderationActions}
               getRowKey={(row) => row.id}
               emptyMessage="No moderation actions yet"
+            />
+            <PaginationBar
+              page={moderationPage}
+              pageSize={moderationPageSize}
+              total={moderationTotal}
+              onPageChange={onModerationPageChange}
             />
           </SectionCard>
         </div>

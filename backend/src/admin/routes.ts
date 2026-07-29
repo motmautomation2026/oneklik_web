@@ -22,6 +22,7 @@ import {
   getUseCaseBreakdown,
   getUserDetail,
   getUserLedger,
+  getUserModerationActions,
   getUsers,
   getUsersKpis,
   grantUserCredits,
@@ -46,12 +47,12 @@ import {
 } from "../lib/issueInvoice.js";
 import {
   addAdminMessage,
-  ExportTooLargeError,
-  MAX_EXPORT_ROWS,
   getAdminAttachmentUrl,
   getSupportBadgeCount,
   getSupportKpis,
   getSupportTicketDetail,
+  getSupportTicketEvents,
+  getSupportTicketMessages,
   getSupportTickets,
   getSupportTicketsForExport,
   markTicketReadByAdmin,
@@ -59,6 +60,7 @@ import {
   updateSupportTicket,
   type AdminTicketRow,
 } from "./supportQueries.js";
+import { ExportTooLargeError, MAX_EXPORT_ROWS } from "./exportLimits.js";
 import {
   MAX_BODY_LENGTH,
   TICKET_CATEGORIES,
@@ -261,6 +263,11 @@ router.get("/users/export", async (req: Request, res: Response) => {
     );
     return sendCsv(res, "users.csv", csv);
   } catch (err) {
+    if (err instanceof ExportTooLargeError) {
+      return res.status(413).json({
+        error: `That's ${err.total.toLocaleString()} users, more than the ${MAX_EXPORT_ROWS.toLocaleString()} this export supports. Narrow the search and try again.`,
+      });
+    }
     req.log.error({ err }, "admin: failed to export users");
     return res.status(500).json({ error: "Could not export users" });
   }
@@ -289,6 +296,11 @@ router.get("/transactions/export", async (req: Request, res: Response) => {
     );
     return sendCsv(res, "transactions.csv", csv);
   } catch (err) {
+    if (err instanceof ExportTooLargeError) {
+      return res.status(413).json({
+        error: `That's ${err.total.toLocaleString()} transactions, more than the ${MAX_EXPORT_ROWS.toLocaleString()} this export supports. Narrow the filters and try again.`,
+      });
+    }
     req.log.error({ err }, "admin: failed to export transactions");
     return res.status(500).json({ error: "Could not export transactions" });
   }
@@ -457,6 +469,11 @@ router.get("/invoices/export", async (req: Request, res: Response) => {
     );
     return sendCsv(res, "invoices.csv", csv);
   } catch (err) {
+    if (err instanceof ExportTooLargeError) {
+      return res.status(413).json({
+        error: `That's ${err.total.toLocaleString()} invoices, more than the ${MAX_EXPORT_ROWS.toLocaleString()} this export supports. Narrow the filters and try again.`,
+      });
+    }
     req.log.error({ err }, "admin: failed to export invoices");
     return res.status(500).json({ error: "Could not export invoices" });
   }
@@ -630,6 +647,18 @@ router.get("/users/:id/ledger", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "admin: failed to load user ledger");
     return res.status(500).json({ error: "Could not load user ledger" });
+  }
+});
+
+router.get("/users/:id/moderation", async (req: Request, res: Response) => {
+  const page = clampInt(req.query.page, 1, 1, 100_000);
+  const pageSize = clampInt(req.query.pageSize, 25, 1, 100);
+  try {
+    const moderation = await getUserModerationActions(req.params.id, { page, pageSize });
+    return res.json(moderation);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load user moderation history");
+    return res.status(500).json({ error: "Could not load moderation history" });
   }
 });
 
@@ -944,6 +973,32 @@ router.get("/support/:id", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "admin: failed to load support ticket");
     return res.status(500).json({ error: "Could not load the ticket" });
+  }
+});
+
+router.get("/support/:id/messages", async (req: Request, res: Response) => {
+  const before = typeof req.query.before === "string" && req.query.before.trim() ? req.query.before.trim() : null;
+  const limit = clampInt(req.query.limit, 50, 1, 100);
+  try {
+    const result = await getSupportTicketMessages(req.params.id, before, limit);
+    if (!result) return res.status(404).json({ error: "Ticket not found" });
+    return res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load support messages");
+    return res.status(500).json({ error: "Could not load messages" });
+  }
+});
+
+router.get("/support/:id/events", async (req: Request, res: Response) => {
+  const before = typeof req.query.before === "string" && req.query.before.trim() ? req.query.before.trim() : null;
+  const limit = clampInt(req.query.limit, 50, 1, 100);
+  try {
+    const result = await getSupportTicketEvents(req.params.id, before, limit);
+    if (!result) return res.status(404).json({ error: "Ticket not found" });
+    return res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load support events");
+    return res.status(500).json({ error: "Could not load events" });
   }
 });
 

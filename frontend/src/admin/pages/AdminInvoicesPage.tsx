@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Badge, Button, Form } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   exportInvoicesCsv,
   fetchInvoices,
@@ -47,6 +47,7 @@ function gstTotalMinor(row: AdminInvoiceListRow): number {
 }
 
 export default function AdminInvoicesPage() {
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [documentType, setDocumentType] = useState<InvoiceDocumentType | "">("");
   const [status, setStatus] = useState<InvoiceStatus | "">("");
@@ -54,7 +55,7 @@ export default function AdminInvoicesPage() {
   const [financialYear, setFinancialYear] = useState("");
   const [issuedFrom, setIssuedFrom] = useState("");
   const [issuedTo, setIssuedTo] = useState("");
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
   const search = useDebouncedValue(searchInput);
   const [exporting, setExporting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);

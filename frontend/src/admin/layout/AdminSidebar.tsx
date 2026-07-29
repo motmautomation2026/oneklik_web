@@ -4,6 +4,8 @@ import {
   Activity,
   ChevronDoubleLeft,
   ChevronDoubleRight,
+  CreditCard2Front,
+  FileEarmarkText,
   LifePreserver,
   PeopleFill,
   Receipt,
@@ -42,6 +44,8 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: "/admin", label: "Dashboard", icon: Speedometer2, end: true },
   { to: "/admin/users", label: "Users", icon: PeopleFill },
   { to: "/admin/transactions", label: "Transactions", icon: Receipt },
+  { to: "/admin/invoices", label: "Invoices", icon: FileEarmarkText },
+  { to: "/admin/subscriptions", label: "Subscriptions", icon: CreditCard2Front },
   { to: "/admin/runs", label: "Runs", icon: Activity },
   { to: "/admin/support", label: "Support", icon: LifePreserver, badge: true },
 ];

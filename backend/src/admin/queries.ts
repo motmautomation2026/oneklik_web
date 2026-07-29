@@ -1,4 +1,6 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { fetchUserBillingBundle, getInvoiceHintsByPaymentIds, getSubscriptionHintsByUserIds } from "./billingQueries.js";
+import { ExportTooLargeError, MAX_EXPORT_ROWS } from "./exportLimits.js";
 import type {
   AccountStatus,
   AdminAccountRow,
@@ -16,6 +18,7 @@ import type {
   ListsActivity,
   PaginatedLedger,
   PaginatedLists,
+  PaginatedModerationActions,
   PaginatedRuns,
   PaginatedTransactions,
   PaginatedUsers,
@@ -26,6 +29,7 @@ import type {
   RunRow,
   RunStatus,
   RunsKpis,
+  SubscriptionStatus,
   SystemHealth,
   TransactionsKpis,
   TrendPoint,
@@ -36,20 +40,18 @@ import type {
 } from "./types.js";
 
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 20; // bounds every paginated scan to 20k rows — see note below
+const MAX_PAGES = 20; // still used by export page loops and email-search fallback
 
-// No schema changes were made for this feature, so there are no SQL
-// sum()/count(distinct) aggregates to call — these helpers page through raw
-// rows and reduce in JS, bounded by MAX_PAGES so no admin endpoint can be
-// made to pull an unbounded table. Fine at current data volume; if this ever
-// gets slow, the fix is moving these into SQL views/RPCs (a DB change,
-// intentionally out of scope here). Filter callbacks are typed `any` to
-// match the rest of this codebase, which doesn't use generated Supabase
-// Database types anywhere (see supabaseAdmin.ts) — the alternative is
-// fighting postgrest-js's chained generics for no real type-safety gain.
+// Prefer SQL sum when we can express the filter as an RPC; otherwise page
+// and reduce in JS. PostgREST `column.sum()` is intentionally avoided — many
+// Supabase projects reject aggregate selects, which broke the overview KPIs.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function sumColumn(table: string, column: string, filters: (q: any) => any): Promise<number> {
+async function sumColumnPaged(
+  table: string,
+  column: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  filters: (q: any) => any,
+): Promise<number> {
   let total = 0;
   let from = 0;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -65,25 +67,22 @@ async function sumColumn(table: string, column: string, filters: (q: any) => any
   return total;
 }
 
+// payments → fn_admin_distinct_paid_users (hardcoded status = 'success').
+// enrichment_runs → fn_admin_distinct_run_users (optional since filter).
 async function distinctUserCount(
   table: "enrichment_runs" | "payments",
-  filters: { statusEq?: string; sinceIso?: string },
+  filters: { sinceIso?: string } = {},
 ): Promise<number> {
-  const seen = new Set<string>();
-  let from = 0;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    let query = supabaseAdmin.from(table).select("user_id").range(from, from + PAGE_SIZE - 1);
-    if (filters.statusEq) query = query.eq("status", filters.statusEq);
-    if (filters.sinceIso) query = query.gte("created_at", filters.sinceIso);
-    const { data, error } = await query;
+  if (table === "payments") {
+    const { data, error } = await supabaseAdmin.rpc("fn_admin_distinct_paid_users");
     if (error) throw error;
-    const rows = (data ?? []) as { user_id: string }[];
-    if (rows.length === 0) break;
-    for (const row of rows) seen.add(row.user_id);
-    if (rows.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+    return Number(data) || 0;
   }
-  return seen.size;
+  const { data, error } = await supabaseAdmin.rpc("fn_admin_distinct_run_users", {
+    p_since: filters.sinceIso ?? null,
+  });
+  if (error) throw error;
+  return Number(data) || 0;
 }
 
 // idColumn defaults to "id" but some tables (credit_wallets) have no such
@@ -110,31 +109,35 @@ async function totalSignups(): Promise<number> {
 }
 
 async function attachEmails<T extends { user_id: string }>(rows: T[]): Promise<(T & { email: string | null })[]> {
-  return Promise.all(
-    rows.map(async (row) => {
-      const { data } = await supabaseAdmin.auth.admin.getUserById(row.user_id);
-      return { ...row, email: data.user?.email ?? null };
-    }),
-  );
+  if (rows.length === 0) return [];
+  const ids = [...new Set(rows.map((r) => r.user_id))];
+  const { data, error } = await supabaseAdmin.from("profiles").select("id, email").in("id", ids);
+  if (error) throw error;
+  const emailById = new Map((data ?? []).map((r) => [r.id as string, (r.email as string | null) ?? null]));
+  return rows.map((row) => ({ ...row, email: emailById.get(row.user_id) ?? null }));
 }
 
-// Bounded scan over the GoTrue admin user list (same MAX_PAGES/PAGE_SIZE
-// bound as every other scan here) — profiles/payments don't store email, so
-// any email-substring search has to go through auth.admin.listUsers. Shared
-// by getUsers and getTransactions.
+// Indexed substring search on the profiles.email mirror (synced from
+// auth.users). Falls back to empty when the term is blank. Paged with the
+// same MAX_PAGES/PAGE_SIZE bound as every other admin scan.
 async function findUserIdsByEmailSubstring(term: string): Promise<Set<string>> {
   const needle = term.trim().toLowerCase();
   const ids = new Set<string>();
   if (!needle) return ids;
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: PAGE_SIZE });
+  let from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("email", `%${needle}%`)
+      .range(from, from + PAGE_SIZE - 1);
     if (error) throw error;
-    const users = "users" in data ? data.users : [];
-    for (const user of users) {
-      if (user.email?.toLowerCase().includes(needle)) ids.add(user.id);
-    }
-    if (users.length < PAGE_SIZE) break;
+    const rows = (data ?? []) as { id: string }[];
+    if (rows.length === 0) break;
+    for (const row of rows) ids.add(row.id);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
   }
   return ids;
 }
@@ -145,29 +148,55 @@ export async function getOverview(): Promise<AdminOverview> {
   const since7dIso = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const since30dIso = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [
-    totalSignupsCount,
-    verifiedCount,
-    onboardedCount,
-    revenueAllTime,
-    revenueMtd,
-    walletPurchased,
-    walletConsumed,
-    walletHeld,
-    active7d,
-    active30d,
-  ] = await Promise.all([
+  const [totalSignupsCount, metricsResult] = await Promise.all([
     totalSignups(),
-    headCount("profiles", (q) => q),
-    headCount("profiles", (q) => q.not("company", "is", null)),
-    sumColumn("payments", "amount_minor_units", (q) => q.eq("status", "success")),
-    sumColumn("payments", "amount_minor_units", (q) => q.eq("status", "success").gte("created_at", monthStartIso)),
-    sumColumn("credit_wallets", "lifetime_purchased", (q) => q),
-    sumColumn("credit_wallets", "lifetime_consumed", (q) => q),
-    sumColumn("credit_wallets", "held_balance", (q) => q),
-    distinctUserCount("enrichment_runs", { sinceIso: since7dIso }),
-    distinctUserCount("enrichment_runs", { sinceIso: since30dIso }),
+    supabaseAdmin.rpc("fn_admin_overview_metrics", {
+      p_month_start: monthStartIso,
+      p_since_7d: since7dIso,
+      p_since_30d: since30dIso,
+    }),
   ]);
+
+  if (!metricsResult.error && metricsResult.data) {
+    const m = metricsResult.data as Record<string, number>;
+    return {
+      users: {
+        total_signups: totalSignupsCount,
+        verified: Number(m.verified_profiles) || 0,
+        onboarded: Number(m.onboarded_profiles) || 0,
+      },
+      revenue: {
+        all_time_minor_units: Number(m.revenue_all_time_minor_units) || 0,
+        month_to_date_minor_units: Number(m.revenue_mtd_minor_units) || 0,
+        currency: "INR",
+      },
+      credits: {
+        purchased: Number(m.wallet_purchased) || 0,
+        consumed: Number(m.wallet_consumed) || 0,
+        held: Number(m.wallet_held) || 0,
+      },
+      active_users: {
+        last_7d: Number(m.active_users_7d) || 0,
+        last_30d: Number(m.active_users_30d) || 0,
+      },
+    };
+  }
+
+  // Fallback when 0020 is not applied yet — never use PostgREST .sum().
+  const [verifiedCount, onboardedCount, revenueAllTime, revenueMtd, walletPurchased, walletConsumed, walletHeld, active7d, active30d] =
+    await Promise.all([
+      headCount("profiles", (q) => q),
+      headCount("profiles", (q) => q.not("company", "is", null)),
+      sumColumnPaged("payments", "amount_minor_units", (q) => q.eq("status", "success")),
+      sumColumnPaged("payments", "amount_minor_units", (q) =>
+        q.eq("status", "success").gte("created_at", monthStartIso),
+      ),
+      sumColumnPaged("credit_wallets", "lifetime_purchased", (q) => q),
+      sumColumnPaged("credit_wallets", "lifetime_consumed", (q) => q),
+      sumColumnPaged("credit_wallets", "held_balance", (q) => q),
+      distinctUserCount("enrichment_runs", { sinceIso: since7dIso }),
+      distinctUserCount("enrichment_runs", { sinceIso: since30dIso }),
+    ]);
 
   return {
     users: {
@@ -194,14 +223,6 @@ export async function getOverview(): Promise<AdminOverview> {
 
 const TREND_RUN_TYPES: TrendRunType[] = ["company_search", "people_search", "email_enrich", "mobile_enrich"];
 
-function emptyCreditsByType(): Record<TrendRunType, number> {
-  return { company_search: 0, people_search: 0, email_enrich: 0, mobile_enrich: 0 };
-}
-
-function dayKey(iso: string): string {
-  return iso.slice(0, 10);
-}
-
 async function forEachPage<T>(
   table: string,
   columns: string,
@@ -223,51 +244,24 @@ async function forEachPage<T>(
 }
 
 export async function getTrends(days: number): Promise<TrendPoint[]> {
-  const now = new Date();
-  const sinceDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-  const sinceIso = sinceDate.toISOString();
+  const { data, error } = await supabaseAdmin.rpc("fn_admin_trends", { p_days: days });
+  if (error) throw error;
 
-  const byDay = new Map<string, TrendPoint>();
-  for (let i = 0; i <= days; i++) {
-    const d = new Date(sinceDate.getTime() + i * 24 * 60 * 60 * 1000);
-    const key = dayKey(d.toISOString());
-    byDay.set(key, { date: key, signups: 0, revenue_minor_units: 0, credits_consumed: emptyCreditsByType() });
-  }
+  // jsonb RPCs usually return a parsed array; tolerate a JSON string just in case.
+  const raw = typeof data === "string" ? (JSON.parse(data) as unknown) : data;
+  const rows = Array.isArray(raw) ? (raw as TrendPoint[]) : [];
 
-  await Promise.all([
-    forEachPage<{ created_at: string }>(
-      "profiles",
-      "created_at",
-      (q) => q.gte("created_at", sinceIso),
-      (row) => {
-        const point = byDay.get(dayKey(row.created_at));
-        if (point) point.signups += 1;
-      },
-    ),
-    forEachPage<{ created_at: string; amount_minor_units: number }>(
-      "payments",
-      "created_at, amount_minor_units",
-      (q) => q.eq("status", "success").gte("created_at", sinceIso),
-      (row) => {
-        const point = byDay.get(dayKey(row.created_at));
-        if (point) point.revenue_minor_units += row.amount_minor_units;
-      },
-    ),
-    forEachPage<{ completed_at: string | null; run_type: string; credits_charged: number }>(
-      "enrichment_runs",
-      "completed_at, run_type, credits_charged",
-      (q) => q.not("completed_at", "is", null).gte("completed_at", sinceIso),
-      (row) => {
-        if (!row.completed_at) return;
-        const point = byDay.get(dayKey(row.completed_at));
-        if (point && TREND_RUN_TYPES.includes(row.run_type as TrendRunType)) {
-          point.credits_consumed[row.run_type as TrendRunType] += row.credits_charged;
-        }
-      },
-    ),
-  ]);
-
-  return Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
+  return rows.map((row) => ({
+    date: row.date,
+    signups: Number(row.signups) || 0,
+    revenue_minor_units: Number(row.revenue_minor_units) || 0,
+    credits_consumed: {
+      company_search: Number(row.credits_consumed?.company_search) || 0,
+      people_search: Number(row.credits_consumed?.people_search) || 0,
+      email_enrich: Number(row.credits_consumed?.email_enrich) || 0,
+      mobile_enrich: Number(row.credits_consumed?.mobile_enrich) || 0,
+    },
+  }));
 }
 
 export async function getFunnel(): Promise<FunnelStats> {
@@ -275,8 +269,8 @@ export async function getFunnel(): Promise<FunnelStats> {
     totalSignups(),
     headCount("profiles", (q) => q),
     headCount("profiles", (q) => q.not("company", "is", null)),
-    distinctUserCount("enrichment_runs", {}),
-    distinctUserCount("payments", { statusEq: "success" }),
+    distinctUserCount("enrichment_runs"),
+    distinctUserCount("payments"),
   ]);
 
   return { signed_up: signedUp, verified, onboarded, first_search: firstSearch, paid };
@@ -288,85 +282,40 @@ function emptyRunStatusCounts(): Record<RunStatus, number> {
   return { pending: 0, running: 0, completed: 0, cancelled: 0, failed: 0 };
 }
 
-const PROVIDER_TREND_TOP_N = 4;
-
-// "Is the product actually working" — run outcomes (stuck/failing runs) and
-// per-provider error rate/latency (which upstream n8n webhook is degraded),
-// both derived from columns that already exist for exactly this purpose
-// (enrichment_runs.status, enrichment_results.provider/outcome/latency_ms)
-// but that nothing reads today. The enrichment_results scan also buckets by
-// day in the same pass (not a second query) so the response carries a trend,
-// not just a point-in-time snapshot — only the top-N providers by volume
-// keep their daily series, to keep the response small.
+// "Is the product actually working" — run outcomes and per-provider error
+// rate/latency, aggregated in SQL (fn_admin_system_health) so we never scan
+// enrichment_results into Node.
 export async function getSystemHealth(days: number): Promise<SystemHealth> {
-  const now = new Date();
-  const sinceDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-  const sinceIso = sinceDate.toISOString();
-
-  const runStatusCounts = emptyRunStatusCounts();
-  const providerAgg = new Map<string, { total: number; errors: number; latencySum: number; latencyCount: number }>();
-  const byDayProvider = new Map<string, Map<string, { total: number; errors: number }>>();
-
-  const [, , openFlaggedCount] = await Promise.all([
-    forEachPage<{ status: string }>(
-      "enrichment_runs",
-      "status",
-      (q) => q.gte("created_at", sinceIso),
-      (row) => {
-        if (RUN_STATUSES.includes(row.status as RunStatus)) {
-          runStatusCounts[row.status as RunStatus] += 1;
-        }
-      },
-    ),
-    forEachPage<{ provider: string; outcome: string; latency_ms: number | null; created_at: string }>(
-      "enrichment_results",
-      "provider, outcome, latency_ms, created_at",
-      (q) => q.gte("created_at", sinceIso),
-      (row) => {
-        const agg = providerAgg.get(row.provider) ?? { total: 0, errors: 0, latencySum: 0, latencyCount: 0 };
-        agg.total += 1;
-        if (row.outcome === "error") agg.errors += 1;
-        if (typeof row.latency_ms === "number") {
-          agg.latencySum += row.latency_ms;
-          agg.latencyCount += 1;
-        }
-        providerAgg.set(row.provider, agg);
-
-        const day = dayKey(row.created_at);
-        const dayMap = byDayProvider.get(day) ?? new Map<string, { total: number; errors: number }>();
-        const dayAgg = dayMap.get(row.provider) ?? { total: 0, errors: 0 };
-        dayAgg.total += 1;
-        if (row.outcome === "error") dayAgg.errors += 1;
-        dayMap.set(row.provider, dayAgg);
-        byDayProvider.set(day, dayMap);
-      },
-    ),
+  const [{ data, error }, openFlaggedCount] = await Promise.all([
+    supabaseAdmin.rpc("fn_admin_system_health", { p_days: days }),
     getOpenFlaggedCount(),
   ]);
+  if (error) throw error;
 
-  const providers: ProviderHealth[] = Array.from(providerAgg.entries())
-    .map(([provider, agg]) => ({
-      provider,
-      total: agg.total,
-      error_rate: agg.total > 0 ? agg.errors / agg.total : 0,
-      avg_latency_ms: agg.latencyCount > 0 ? Math.round(agg.latencySum / agg.latencyCount) : null,
-    }))
-    .sort((a, b) => b.total - a.total);
+  const payload = (data ?? {}) as {
+    run_status_counts?: Record<string, number>;
+    providers?: ProviderHealth[];
+    provider_error_trend?: ProviderErrorTrendPoint[];
+  };
 
-  const topProviders = new Set(providers.slice(0, PROVIDER_TREND_TOP_N).map((p) => p.provider));
-
-  const providerErrorTrend: ProviderErrorTrendPoint[] = [];
-  for (let i = 0; i <= days; i++) {
-    const d = new Date(sinceDate.getTime() + i * 24 * 60 * 60 * 1000);
-    const key = dayKey(d.toISOString());
-    const dayMap = byDayProvider.get(key);
-    const rates: Record<string, number> = {};
-    for (const provider of topProviders) {
-      const agg = dayMap?.get(provider);
-      rates[provider] = agg && agg.total > 0 ? agg.errors / agg.total : 0;
-    }
-    providerErrorTrend.push({ date: key, rates });
+  const runStatusCounts = emptyRunStatusCounts();
+  for (const status of RUN_STATUSES) {
+    runStatusCounts[status] = Number(payload.run_status_counts?.[status]) || 0;
   }
+
+  const providers: ProviderHealth[] = (payload.providers ?? []).map((p) => ({
+    provider: p.provider,
+    total: Number(p.total) || 0,
+    error_rate: Number(p.error_rate) || 0,
+    avg_latency_ms: p.avg_latency_ms == null ? null : Number(p.avg_latency_ms),
+  }));
+
+  const providerErrorTrend: ProviderErrorTrendPoint[] = (payload.provider_error_trend ?? []).map((point) => ({
+    date: point.date,
+    rates: Object.fromEntries(
+      Object.entries(point.rates ?? {}).map(([provider, rate]) => [provider, Number(rate) || 0]),
+    ),
+  }));
 
   return {
     run_status_counts: runStatusCounts,
@@ -378,6 +327,7 @@ export async function getSystemHealth(days: number): Promise<SystemHealth> {
 
 interface ProfileWithWallet {
   id: string;
+  email: string | null;
   company: string | null;
   created_at: string;
   account_status: AccountStatus;
@@ -391,11 +341,15 @@ interface ProfileWithWallet {
 }
 
 const PROFILE_WITH_WALLET_SELECT =
-  "id, company, created_at, account_status, suspended_until, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
+  "id, email, company, created_at, account_status, suspended_until, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
 
 // Shared by getUsers and getAllUsersForExport (the export path scans every
 // matching page instead of one) so both build the exact same row shape.
-function toAdminUserRow(row: ProfileWithWallet & { email: string | null }, flaggedSet: Set<string>): AdminUserRow {
+function toAdminUserRow(
+  row: ProfileWithWallet,
+  flaggedSet: Set<string>,
+  subHint?: { plan_id: string; status: SubscriptionStatus } | null,
+): AdminUserRow {
   return {
     user_id: row.id,
     email: row.email,
@@ -409,6 +363,8 @@ function toAdminUserRow(row: ProfileWithWallet & { email: string | null }, flagg
     is_flagged: flaggedSet.has(row.id),
     account_status: row.account_status ?? "active",
     suspended_until: row.suspended_until ?? null,
+    plan_id: subHint?.plan_id ?? null,
+    subscription_status: subHint?.status ?? null,
   };
 }
 
@@ -486,16 +442,20 @@ export async function getUsers({ page, pageSize, search, status }: GetUsersParam
   }
 
   const userIds = profileRows.map((r) => r.id);
-  const flaggedSet = await getOpenFlaggedSetFor(userIds);
-  const withEmails = await attachEmails(profileRows.map((r) => ({ ...r, user_id: r.id })));
-  const rows: AdminUserRow[] = withEmails.map((row) => toAdminUserRow(row, flaggedSet));
+  const [flaggedSet, subHints] = await Promise.all([
+    getOpenFlaggedSetFor(userIds),
+    getSubscriptionHintsByUserIds(userIds),
+  ]);
+  const rows: AdminUserRow[] = profileRows.map((row) =>
+    toAdminUserRow(row, flaggedSet, subHints.get(row.id) ?? null),
+  );
 
   return { rows, total, page, page_size: pageSize };
 }
 
-// Same filtering as getUsers, but scans every matching page (bounded by
-// MAX_PAGES, same 20k-row cap as every other unbounded scan in this file)
-// instead of one — used only by the CSV export route.
+// Same filtering as getUsers, but scans every matching page. Past
+// MAX_EXPORT_ROWS this refuses outright instead of truncating — used only by
+// the CSV export route.
 export async function getAllUsersForExport(search?: string): Promise<AdminUserRow[]> {
   const trimmedSearch = search?.trim();
   let idFilter: string[] | null = null;
@@ -512,6 +472,11 @@ export async function getAllUsersForExport(search?: string): Promise<AdminUserRo
     if (idFilter.length === 0) return [];
   }
 
+  const total = idFilter
+    ? idFilter.length
+    : await headCount("profiles", (q) => q);
+  if (total > MAX_EXPORT_ROWS) throw new ExportTooLargeError(total);
+
   const profileRows: ProfileWithWallet[] = [];
   await forEachPage<ProfileWithWallet>(
     "profiles",
@@ -520,9 +485,12 @@ export async function getAllUsersForExport(search?: string): Promise<AdminUserRo
     (row) => profileRows.push(row),
   );
 
-  const flaggedSet = await getOpenFlaggedSetFor(profileRows.map((r) => r.id));
-  const withEmails = await attachEmails(profileRows.map((r) => ({ ...r, user_id: r.id })));
-  return withEmails.map((row) => toAdminUserRow(row, flaggedSet));
+  const userIds = profileRows.map((r) => r.id);
+  const [flaggedSet, subHints] = await Promise.all([
+    getOpenFlaggedSetFor(userIds),
+    getSubscriptionHintsByUserIds(userIds),
+  ]);
+  return profileRows.map((row) => toAdminUserRow(row, flaggedSet, subHints.get(row.id) ?? null));
 }
 
 interface RawPaymentRow {
@@ -536,10 +504,12 @@ interface RawPaymentRow {
   currency: string;
   created_at: string;
   updated_at: string;
+  billing_intent: string | null;
+  pack_id: string | null;
 }
 
 const PAYMENT_SELECT =
-  "id, user_id, status, gateway, gateway_payment_id, credits_promised, amount_minor_units, currency, created_at, updated_at";
+  "id, user_id, status, gateway, gateway_payment_id, credits_promised, amount_minor_units, currency, created_at, updated_at, billing_intent, pack_id";
 
 interface GetTransactionsParams {
   page: number;
@@ -605,11 +575,24 @@ export async function getTransactions({
   const rows = (data ?? []) as RawPaymentRow[];
 
   const withEmails = await attachEmails(rows);
-  return { rows: withEmails as PaymentRow[], total: count ?? 0, page, page_size: pageSize };
+  const invoiceHints = await getInvoiceHintsByPaymentIds(rows.map((r) => r.id));
+  const withInvoices: PaymentRow[] = withEmails.map((row) => {
+    const hint = invoiceHints.get(row.id);
+    return {
+      ...row,
+      billing_intent: row.billing_intent ?? null,
+      pack_id: row.pack_id ?? null,
+      invoice_id: hint?.invoice_id ?? null,
+      invoice_number: hint?.invoice_number ?? null,
+      receipt_number: hint?.receipt_number ?? null,
+    };
+  });
+  return { rows: withInvoices, total: count ?? 0, page, page_size: pageSize };
 }
 
-// Same filtering as getTransactions, but scans every matching page (bounded
-// by MAX_PAGES) instead of one — used only by the CSV export route.
+// Same filtering as getTransactions, but scans every matching page. Past
+// MAX_EXPORT_ROWS this refuses outright instead of truncating — used only by
+// the CSV export route.
 export async function getAllTransactionsForExport({
   status,
   search,
@@ -618,6 +601,12 @@ export async function getAllTransactionsForExport({
   search?: string;
 }): Promise<PaymentRow[]> {
   const filter = await resolveTransactionsFilter(search);
+  const total = await headCount("payments", (q) => {
+    const filtered = applyTransactionsFilter(q, filter);
+    return status ? filtered.eq("status", status) : filtered;
+  });
+  if (total > MAX_EXPORT_ROWS) throw new ExportTooLargeError(total);
+
   const rows: RawPaymentRow[] = [];
   await forEachPage<RawPaymentRow>(
     "payments",
@@ -628,7 +617,19 @@ export async function getAllTransactionsForExport({
     },
     (row) => rows.push(row),
   );
-  return (await attachEmails(rows)) as PaymentRow[];
+  const withEmails = await attachEmails(rows);
+  const invoiceHints = await getInvoiceHintsByPaymentIds(rows.map((r) => r.id));
+  return withEmails.map((row) => {
+    const hint = invoiceHints.get(row.id);
+    return {
+      ...row,
+      billing_intent: row.billing_intent ?? null,
+      pack_id: row.pack_id ?? null,
+      invoice_id: hint?.invoice_id ?? null,
+      invoice_number: hint?.invoice_number ?? null,
+      receipt_number: hint?.receipt_number ?? null,
+    };
+  });
 }
 
 // Deliberately scoped by search only, not the status dropdown — filtering to
@@ -644,14 +645,45 @@ export async function getTransactionsKpis({ search }: { search?: string }): Prom
     return statusEq ? filtered.eq("status", statusEq) : filtered;
   };
 
-  const [totalCount, successCount, failedCount, pendingCount, initiatedCount, revenue] = await Promise.all([
+  let revenueRpcArgs: { p_status: string; p_user_ids: string[] | null; p_gateway_ilike: string | null } = {
+    p_status: "success",
+    p_user_ids: null,
+    p_gateway_ilike: null,
+  };
+  if (filter.type === "ids") {
+    revenueRpcArgs = {
+      p_status: "success",
+      p_user_ids: filter.ids.length > 0 ? filter.ids : [NO_MATCH_USER_ID],
+      p_gateway_ilike: null,
+    };
+  } else if (filter.type === "ilike") {
+    revenueRpcArgs = { p_status: "success", p_user_ids: null, p_gateway_ilike: filter.term };
+  }
+
+  const [totalCount, successCount, failedCount, pendingCount, initiatedCount, revenueResult] = await Promise.all([
     headCount("payments", withFilter()),
     headCount("payments", withFilter("success")),
     headCount("payments", withFilter("failed")),
     headCount("payments", withFilter("pending")),
     headCount("payments", withFilter("initiated")),
-    sumColumn("payments", "amount_minor_units", withFilter("success")),
+    supabaseAdmin.rpc("fn_admin_sum_payment_amounts", revenueRpcArgs),
   ]);
+  if (revenueResult.error) {
+    // Fallback if migration 0020 is not applied yet.
+    const revenue = await sumColumnPaged("payments", "amount_minor_units", withFilter("success"));
+    return {
+      total_count: totalCount,
+      success_count: successCount,
+      failed_count: failedCount,
+      pending_count: pendingCount,
+      initiated_count: initiatedCount,
+      revenue_minor_units: revenue,
+      avg_amount_minor_units: successCount > 0 ? Math.round(revenue / successCount) : 0,
+      success_rate: totalCount > 0 ? successCount / totalCount : 0,
+    };
+  }
+
+  const revenue = Number(revenueResult.data) || 0;
 
   return {
     total_count: totalCount,
@@ -670,7 +702,7 @@ export async function getUsersKpis(): Promise<UsersKpis> {
   const since7dIso = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const monthStartIso = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-  const [totalUsers, newThisWeek, newThisMonth, onboardedCount, zeroBalanceCount, openFlaggedCount, lifetimeConsumedSum] =
+  const [totalUsers, newThisWeek, newThisMonth, onboardedCount, zeroBalanceCount, openFlaggedCount, consumedResult] =
     await Promise.all([
       headCount("profiles", (q) => q),
       headCount("profiles", (q) => q.gte("created_at", since7dIso)),
@@ -678,8 +710,13 @@ export async function getUsersKpis(): Promise<UsersKpis> {
       headCount("profiles", (q) => q.not("company", "is", null)),
       headCount("credit_wallets", (q) => q.eq("available_balance", 0), "user_id"),
       getOpenFlaggedCount(),
-      sumColumn("credit_wallets", "lifetime_consumed", (q) => q),
+      supabaseAdmin.rpc("fn_admin_sum_wallet_lifetime_consumed"),
     ]);
+
+  let lifetimeConsumedSum = Number(consumedResult.data) || 0;
+  if (consumedResult.error) {
+    lifetimeConsumedSum = await sumColumnPaged("credit_wallets", "lifetime_consumed", (q) => q);
+  }
 
   return {
     total_users: totalUsers,
@@ -693,21 +730,12 @@ export async function getUsersKpis(): Promise<UsersKpis> {
 }
 
 export async function getFeatureUsage(days: number): Promise<FeatureUsageEntry[]> {
-  const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const totals = emptyCreditsByType();
-
-  await forEachPage<{ run_type: string; credits_charged: number }>(
-    "enrichment_runs",
-    "run_type, credits_charged",
-    (q) => q.not("completed_at", "is", null).gte("completed_at", sinceIso),
-    (row) => {
-      if (TREND_RUN_TYPES.includes(row.run_type as TrendRunType)) {
-        totals[row.run_type as TrendRunType] += row.credits_charged;
-      }
-    },
-  );
-
-  return TREND_RUN_TYPES.map((run_type) => ({ run_type, credits: totals[run_type] }));
+  const { data, error } = await supabaseAdmin.rpc("fn_admin_feature_usage", { p_days: days });
+  if (error) throw error;
+  const raw = typeof data === "string" ? (JSON.parse(data) as unknown) : data;
+  const rows = Array.isArray(raw) ? (raw as FeatureUsageEntry[]) : [];
+  const byType = new Map(rows.map((r) => [r.run_type, Number(r.credits) || 0]));
+  return TREND_RUN_TYPES.map((run_type) => ({ run_type, credits: byType.get(run_type) ?? 0 }));
 }
 
 export async function getListsActivity(): Promise<ListsActivity> {
@@ -728,25 +756,17 @@ export async function getListsActivity(): Promise<ListsActivity> {
 }
 
 export async function getUseCaseBreakdown(): Promise<UseCaseBreakdownEntry[]> {
-  const counts = new Map<string, number>();
-
-  await forEachPage<{ use_case: string | null }>(
-    "profiles",
-    "use_case",
-    (q) => q,
-    (row) => {
-      const key = row.use_case?.trim() || "Not set";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    },
-  );
-
-  return Array.from(counts.entries())
-    .map(([use_case, count]) => ({ use_case, count }))
+  const { data, error } = await supabaseAdmin.rpc("fn_admin_use_case_breakdown");
+  if (error) throw error;
+  const raw = typeof data === "string" ? (JSON.parse(data) as unknown) : data;
+  const rows = Array.isArray(raw) ? (raw as UseCaseBreakdownEntry[]) : [];
+  return rows
+    .map((r) => ({ use_case: r.use_case, count: Number(r.count) || 0 }))
     .sort((a, b) => b.count - a.count);
 }
 
 const USER_DETAIL_SELECT =
-  "id, company, role, use_case, created_at, account_status, suspended_until, status_reason, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
+  "id, email, company, role, use_case, created_at, account_status, suspended_until, status_reason, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
 
 interface ProfileDetailRow extends ProfileWithWallet {
   role: string | null;
@@ -767,18 +787,18 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
 
   const typedProfile = profile as unknown as ProfileDetailRow;
 
-  const [flagResult, moderationResult, listResult, listsTotal, paymentResult, paymentsTotal, emailResult] =
+  // Nested lists are capped previews (+ totals). Moderation history is a
+  // separate paginated endpoint — same pattern as the credit ledger.
+  const [openFlagResult, flagsTotal, listResult, listsTotal, paymentResult, paymentsTotal, billing] =
     await Promise.all([
       supabaseAdmin
         .from("flagged_accounts")
         .select("id, reason, source, status, created_at, reviewed_at, reviewed_by")
         .eq("user_id", userId)
-        .order("created_at", { ascending: false }),
-      supabaseAdmin
-        .from("moderation_actions")
-        .select("id, action, previous_status, new_status, reason, suspended_until, acted_by, created_at")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false }),
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(50),
+      headCount("flagged_accounts", (q) => q.eq("user_id", userId)),
       supabaseAdmin
         .from("lists")
         .select("id, name, kind, created_at")
@@ -793,17 +813,16 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
         .order("created_at", { ascending: false })
         .limit(20),
       headCount("payments", (q) => q.eq("user_id", userId)),
-      supabaseAdmin.auth.admin.getUserById(userId),
+      fetchUserBillingBundle(userId),
     ]);
 
-  if (flagResult.error) throw flagResult.error;
-  if (moderationResult.error) throw moderationResult.error;
+  if (openFlagResult.error) throw openFlagResult.error;
   if (listResult.error) throw listResult.error;
   if (paymentResult.error) throw paymentResult.error;
 
-  const email = emailResult.data.user?.email ?? null;
+  const email = typedProfile.email;
   const wallet = typedProfile.credit_wallets;
-  const flags = (flagResult.data ?? []) as FlaggedAccountRow[];
+  const flags = (openFlagResult.data ?? []) as FlaggedAccountRow[];
 
   const user: AdminUserRow = {
     user_id: typedProfile.id,
@@ -815,18 +834,29 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     held_balance: wallet?.held_balance ?? 0,
     lifetime_purchased: wallet?.lifetime_purchased ?? 0,
     lifetime_consumed: wallet?.lifetime_consumed ?? 0,
-    is_flagged: flags.some((f) => f.status === "open"),
+    is_flagged: flags.length > 0,
     account_status: typedProfile.account_status ?? "active",
     suspended_until: typedProfile.suspended_until ?? null,
+    plan_id: billing.subscription?.plan_id ?? null,
+    subscription_status: billing.subscription?.status ?? null,
   };
-
-  const moderationActions = await resolveActorEmails(
-    (moderationResult.data ?? []) as Omit<ModerationActionRow, "acted_by_email">[],
-  );
 
   // All rows here belong to the one user already looked up above — no need
   // to pay for attachEmails' per-row getUserById lookups.
-  const payments: PaymentRow[] = ((paymentResult.data ?? []) as RawPaymentRow[]).map((p) => ({ ...p, email }));
+  const rawPayments = (paymentResult.data ?? []) as RawPaymentRow[];
+  const invoiceHints = await getInvoiceHintsByPaymentIds(rawPayments.map((p) => p.id));
+  const payments: PaymentRow[] = rawPayments.map((p) => {
+    const hint = invoiceHints.get(p.id);
+    return {
+      ...p,
+      email,
+      billing_intent: p.billing_intent ?? null,
+      pack_id: p.pack_id ?? null,
+      invoice_id: hint?.invoice_id ?? null,
+      invoice_number: hint?.invoice_number ?? null,
+      receipt_number: hint?.receipt_number ?? null,
+    };
+  });
 
   return {
     user,
@@ -834,11 +864,15 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     use_case: typedProfile.use_case,
     status_reason: typedProfile.status_reason,
     flags,
-    moderation_actions: moderationActions,
+    flags_total: flagsTotal,
     lists: (listResult.data ?? []) as { id: string; name: string; kind: string; created_at: string }[],
     lists_total: listsTotal,
     payments,
     payments_total: paymentsTotal,
+    subscription: billing.subscription,
+    billing_profile: billing.billing_profile,
+    invoices: billing.invoices,
+    invoices_total: billing.invoices_total,
   };
 }
 
@@ -848,14 +882,15 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
 async function resolveActorEmails(
   rows: Omit<ModerationActionRow, "acted_by_email">[],
 ): Promise<ModerationActionRow[]> {
-  const emailByActor = new Map<string, string | null>();
   const actorIds = [...new Set(rows.map((r) => r.acted_by).filter((id): id is string => Boolean(id)))];
-  await Promise.all(
-    actorIds.map(async (id) => {
-      const { data } = await supabaseAdmin.auth.admin.getUserById(id);
-      emailByActor.set(id, data.user?.email ?? null);
-    }),
-  );
+  const emailByActor = new Map<string, string | null>();
+  if (actorIds.length > 0) {
+    const { data, error } = await supabaseAdmin.from("profiles").select("id, email").in("id", actorIds);
+    if (error) throw error;
+    for (const row of (data ?? []) as { id: string; email: string | null }[]) {
+      emailByActor.set(row.id, row.email);
+    }
+  }
   return rows.map((r) => ({ ...r, acted_by_email: r.acted_by ? emailByActor.get(r.acted_by) ?? null : null }));
 }
 
@@ -880,6 +915,26 @@ export async function getUserLedger(userId: string, { page, pageSize }: GetUserL
   if (error) throw error;
 
   return { rows: (data ?? []) as LedgerEntry[], total: count ?? 0, page, page_size: pageSize };
+}
+
+export async function getUserModerationActions(
+  userId: string,
+  { page, pageSize }: GetUserLedgerParams,
+): Promise<PaginatedModerationActions> {
+  const from = (page - 1) * pageSize;
+
+  const { data, error, count } = await supabaseAdmin
+    .from("moderation_actions")
+    .select("id, action, previous_status, new_status, reason, suspended_until, acted_by, created_at", {
+      count: "exact",
+    })
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .range(from, from + pageSize - 1);
+  if (error) throw error;
+
+  const rows = await resolveActorEmails((data ?? []) as Omit<ModerationActionRow, "acted_by_email">[]);
+  return { rows, total: count ?? 0, page, page_size: pageSize };
 }
 
 // Closes a flag — only 'reviewed' or 'dismissed' are accepted targets (the
@@ -977,6 +1032,81 @@ export async function setUserAccountStatus(params: {
   if (auditError) throw auditError;
 
   return { ok: true, previous_status: previousStatus, new_status: newStatus };
+}
+
+// Hard ceiling per grant call. Monthly packs are 4k–20k; 50k leaves headroom
+// for multi-pack goodwill without letting a typo grant millions.
+export const MAX_ADMIN_CREDIT_GRANT = 50_000;
+export const MIN_ADMIN_CREDIT_GRANT_REASON_LENGTH = 5;
+
+export type GrantUserCreditsResult =
+  | { ok: false; reason: "not_found" | "wallet_not_found" }
+  | { ok: true; available_balance: number; reference_id: string; amount: number };
+
+// Grant-only credit compensation. Wallet mutation goes through
+// fn_admin_adjust_credits (admin_adjustment ledger row). Audit free-text +
+// acted_by live in admin_credit_adjustments. Does not touch lifetime_purchased,
+// held_balance, or subscriptions.
+export async function grantUserCredits(params: {
+  userId: string;
+  amount: number;
+  reason: string;
+  reasonCode: string;
+  actedBy: string;
+  referenceId: string;
+}): Promise<GrantUserCreditsResult> {
+  const { userId, amount, reason, reasonCode, actedBy, referenceId } = params;
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (!profile) return { ok: false, reason: "not_found" };
+
+  const { data: wallet, error: walletError } = await supabaseAdmin
+    .from("credit_wallets")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (walletError) throw walletError;
+  if (!wallet) return { ok: false, reason: "wallet_not_found" };
+
+  const { data: balanceAfter, error: rpcError } = await supabaseAdmin.rpc("fn_admin_adjust_credits", {
+    p_user_id: userId,
+    p_amount: amount,
+    p_reference_id: referenceId,
+    p_reason_code: reasonCode,
+  });
+  if (rpcError) throw rpcError;
+
+  const availableBalance = typeof balanceAfter === "number" ? balanceAfter : Number(balanceAfter);
+  if (!Number.isFinite(availableBalance)) {
+    throw new Error("fn_admin_adjust_credits returned a non-numeric balance");
+  }
+
+  const { error: auditError } = await supabaseAdmin.from("admin_credit_adjustments").insert({
+    user_id: userId,
+    amount,
+    reason,
+    reason_code: reasonCode,
+    reference_id: referenceId,
+    balance_after: availableBalance,
+    acted_by: actedBy,
+  });
+  if (auditError) {
+    // Unique violation on reference_id means a retry after the RPC succeeded —
+    // treat as success rather than failing the grant the user already received.
+    if (auditError.code !== "23505") throw auditError;
+  }
+
+  return {
+    ok: true,
+    available_balance: availableBalance,
+    reference_id: referenceId,
+    amount,
+  };
 }
 
 // ── v4: runs monitor, lists browser, company rollup, admins ──
@@ -1098,70 +1228,20 @@ export async function getLists({ page, pageSize, search, userId }: GetListsParam
   };
 }
 
-interface CompanyAgg {
-  userIds: Set<string>;
-  lifetime_purchased: number;
-  lifetime_consumed: number;
-  revenue_minor_units: number;
-}
-
-// Two bounded scans (same pattern as getTrends' parallel scans): profiles
-// build the company -> users map and wallet totals, then payments are
-// rolled up into the same map via the id -> company lookup from the first
-// scan. B2B-specific view — profiles.company already exists but nothing
-// aggregates by it today.
 export async function getTopCompanies(limit = 10): Promise<CompanyRollupEntry[]> {
-  const companyByUser = new Map<string, string>();
-  const companyAgg = new Map<string, CompanyAgg>();
-
-  function getAgg(company: string): CompanyAgg {
-    let agg = companyAgg.get(company);
-    if (!agg) {
-      agg = { userIds: new Set(), lifetime_purchased: 0, lifetime_consumed: 0, revenue_minor_units: 0 };
-      companyAgg.set(company, agg);
-    }
-    return agg;
-  }
-
-  await forEachPage<{
-    id: string;
-    company: string | null;
-    credit_wallets: { lifetime_purchased: number; lifetime_consumed: number } | null;
-  }>(
-    "profiles",
-    "id, company, credit_wallets(lifetime_purchased, lifetime_consumed)",
-    (q) => q.not("company", "is", null),
-    (row) => {
-      if (!row.company) return;
-      companyByUser.set(row.id, row.company);
-      const agg = getAgg(row.company);
-      agg.userIds.add(row.id);
-      agg.lifetime_purchased += row.credit_wallets?.lifetime_purchased ?? 0;
-      agg.lifetime_consumed += row.credit_wallets?.lifetime_consumed ?? 0;
-    },
-  );
-
-  await forEachPage<{ user_id: string; amount_minor_units: number }>(
-    "payments",
-    "user_id, amount_minor_units",
-    (q) => q.eq("status", "success"),
-    (row) => {
-      const company = companyByUser.get(row.user_id);
-      if (!company) return;
-      getAgg(company).revenue_minor_units += row.amount_minor_units;
-    },
-  );
-
-  return Array.from(companyAgg.entries())
-    .map(([company, agg]) => ({
-      company,
-      user_count: agg.userIds.size,
-      lifetime_purchased: agg.lifetime_purchased,
-      lifetime_consumed: agg.lifetime_consumed,
-      revenue_minor_units: agg.revenue_minor_units,
-    }))
-    .sort((a, b) => b.lifetime_consumed - a.lifetime_consumed)
-    .slice(0, limit);
+  const { data, error } = await supabaseAdmin.rpc("fn_admin_top_companies", {
+    p_limit: Math.min(Math.max(limit, 1), 50),
+  });
+  if (error) throw error;
+  const raw = typeof data === "string" ? (JSON.parse(data) as unknown) : data;
+  const rows = Array.isArray(raw) ? (raw as CompanyRollupEntry[]) : [];
+  return rows.map((r) => ({
+    company: r.company,
+    user_count: Number(r.user_count) || 0,
+    lifetime_purchased: Number(r.lifetime_purchased) || 0,
+    lifetime_consumed: Number(r.lifetime_consumed) || 0,
+    revenue_minor_units: Number(r.revenue_minor_units) || 0,
+  }));
 }
 
 // Read-only visibility into who currently holds is_admin — granting/revoking
@@ -1170,11 +1250,13 @@ export async function getTopCompanies(limit = 10): Promise<CompanyRollupEntry[]>
 export async function getAdmins(): Promise<AdminAccountRow[]> {
   const { data, error } = await supabaseAdmin
     .from("profiles")
-    .select("id, created_at")
+    .select("id, email, created_at")
     .eq("is_admin", true)
     .order("created_at", { ascending: true });
   if (error) throw error;
-  const rows = (data ?? []) as { id: string; created_at: string }[];
-  const withEmails = await attachEmails(rows.map((r) => ({ user_id: r.id, created_at: r.created_at })));
-  return withEmails.map((r) => ({ user_id: r.user_id, email: r.email, created_at: r.created_at }));
+  return ((data ?? []) as { id: string; email: string | null; created_at: string }[]).map((r) => ({
+    user_id: r.id,
+    email: r.email,
+    created_at: r.created_at,
+  }));
 }

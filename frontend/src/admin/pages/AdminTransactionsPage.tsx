@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { Badge, Button, Form } from "react-bootstrap";
-import { exportTransactionsCsv, fetchTransactions, fetchTransactionsKpis } from "../api/adminApi";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  exportTransactionsCsv,
+  fetchTransactions,
+  fetchTransactionsKpis,
+  openAdminInvoiceHtml,
+} from "../api/adminApi";
 import { PAYMENT_STATUS_VARIANT } from "../badgeVariants";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
@@ -23,11 +29,13 @@ const STATUS_OPTIONS: { value: PaymentStatus | ""; label: string }[] = [
 ];
 
 export default function AdminTransactionsPage() {
+  const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<PaymentStatus | "">("");
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
   const search = useDebouncedValue(searchInput);
   const [exporting, setExporting] = useState(false);
+  const [docBusyId, setDocBusyId] = useState<string | null>(null);
 
   // Deliberately keyed on `search` only, not `status` — matches the
   // backend's scoping (see getTransactionsKpis): the status dropdown keeps
@@ -57,8 +65,24 @@ export default function AdminTransactionsPage() {
     }
   }
 
+  async function handleOpenDocument(row: PaymentRow, view: "invoice" | "receipt") {
+    if (!row.invoice_id) return;
+    setDocBusyId(row.id);
+    try {
+      await openAdminInvoiceHtml(row.invoice_id, view);
+    } finally {
+      setDocBusyId(null);
+    }
+  }
+
   const columns = [
-    { key: "email", header: "User", render: (row: PaymentRow) => row.email ?? row.user_id },
+    {
+      key: "email",
+      header: "User",
+      render: (row: PaymentRow) => (
+        <Link to={`/admin/users/${row.user_id}`}>{row.email ?? row.user_id}</Link>
+      ),
+    },
     {
       key: "status",
       header: "Status",
@@ -81,6 +105,43 @@ export default function AdminTransactionsPage() {
       key: "gateway_payment_id",
       header: "Gateway payment id",
       render: (row: PaymentRow) => row.gateway_payment_id ?? "—",
+    },
+    {
+      key: "document",
+      header: "Document",
+      render: (row: PaymentRow) => {
+        if (!row.invoice_id || !row.invoice_number) {
+          return <span style={{ color: ADMIN_CHART_COLORS.ink.muted }}>—</span>;
+        }
+        return (
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <div className="small">
+              <div>{row.invoice_number}</div>
+              {row.receipt_number && (
+                <div style={{ color: ADMIN_CHART_COLORS.ink.muted }}>{row.receipt_number}</div>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline-secondary"
+              disabled={docBusyId === row.id}
+              onClick={() => handleOpenDocument(row, "invoice")}
+            >
+              Invoice
+            </Button>
+            {row.receipt_number && (
+              <Button
+                size="sm"
+                variant="outline-secondary"
+                disabled={docBusyId === row.id}
+                onClick={() => handleOpenDocument(row, "receipt")}
+              >
+                Receipt
+              </Button>
+            )}
+          </div>
+        );
+      },
     },
     { key: "created_at", header: "Created", render: (row: PaymentRow) => formatDateTime(row.created_at) },
     { key: "updated_at", header: "Updated", render: (row: PaymentRow) => formatDateTime(row.updated_at) },

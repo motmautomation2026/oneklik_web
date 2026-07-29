@@ -77,6 +77,8 @@ export interface ModerationActionRow {
   created_at: string;
 }
 
+export type SubscriptionStatus = "active" | "past_due" | "expired" | "cancelled";
+
 export interface AdminUserRow {
   user_id: string;
   email: string | null;
@@ -90,6 +92,8 @@ export interface AdminUserRow {
   is_flagged: boolean;
   account_status: AccountStatus;
   suspended_until: string | null;
+  plan_id: string | null;
+  subscription_status: SubscriptionStatus | null;
 }
 
 export interface PaginatedUsers {
@@ -113,6 +117,12 @@ export interface PaymentRow {
   currency: string;
   created_at: string;
   updated_at: string;
+  billing_intent: string | null;
+  pack_id: string | null;
+  /** Linked tax invoice when one exists for this payment. */
+  invoice_id: string | null;
+  invoice_number: string | null;
+  receipt_number: string | null;
 }
 
 export interface PaginatedTransactions {
@@ -160,7 +170,14 @@ export interface UseCaseBreakdownEntry {
   count: number;
 }
 
-export type LedgerType = "hold" | "deduct" | "release" | "purchase" | "promo_grant" | "admin_adjustment";
+export type LedgerType =
+  | "hold"
+  | "deduct"
+  | "release"
+  | "purchase"
+  | "promo_grant"
+  | "admin_adjustment"
+  | "expiry";
 
 export interface LedgerEntry {
   id: number;
@@ -173,8 +190,22 @@ export interface LedgerEntry {
   created_at: string;
 }
 
+export interface GrantUserCreditsResponse {
+  ok: true;
+  available_balance: number;
+  reference_id: string;
+  amount: number;
+}
+
 export interface PaginatedLedger {
   rows: LedgerEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PaginatedModerationActions {
+  rows: ModerationActionRow[];
   total: number;
   page: number;
   page_size: number;
@@ -192,17 +223,164 @@ export interface FlaggedAccountRow {
   reviewed_by: string | null;
 }
 
+export interface AdminSubscriptionSummary {
+  plan_id: string;
+  plan_name: string | null;
+  status: SubscriptionStatus;
+  current_period_start: string;
+  current_period_end: string;
+  grace_ends_at: string;
+  pending_plan_id: string | null;
+  credits: number | null;
+  is_in_buffer: boolean;
+  days_to_lapse: number | null;
+  current_period_id: string | null;
+  period_change_type: string | null;
+  period_credits_granted: number | null;
+}
+
+export interface AdminBillingProfileSummary {
+  legal_name: string;
+  entity_type: string;
+  gstin: string | null;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state_code: string;
+  state_name: string;
+  postal_code: string;
+  country: string;
+}
+
+export type InvoiceDocumentType = "tax_invoice" | "credit_note" | "proforma_invoice";
+export type InvoiceStatus = "issued" | "cancelled" | "paid" | "void";
+
+export interface AdminInvoiceRow {
+  id: string;
+  invoice_number: string;
+  document_type: InvoiceDocumentType;
+  status: InvoiceStatus;
+  total_minor: number;
+  currency: string;
+  issued_at: string;
+  due_date: string | null;
+  series: string;
+  receipt_number: string | null;
+}
+
+/** Global invoices directory row (joins buyer snapshot + payment hints). */
+export interface AdminInvoiceListRow {
+  id: string;
+  user_id: string;
+  email: string | null;
+  invoice_number: string;
+  receipt_number: string | null;
+  document_type: InvoiceDocumentType;
+  status: InvoiceStatus;
+  taxable_value_minor: number;
+  cgst_minor: number;
+  sgst_minor: number;
+  igst_minor: number;
+  total_minor: number;
+  currency: string;
+  issued_at: string;
+  due_date: string | null;
+  series: string;
+  financial_year: string;
+  buyer_legal_name: string | null;
+  buyer_gstin: string | null;
+  payment_id: string | null;
+  pack_id: string | null;
+  plan_name: string | null;
+  billing_intent: string | null;
+  gateway_capture_id: string | null;
+}
+
+export interface PaginatedInvoices {
+  rows: AdminInvoiceListRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface InvoicesKpis {
+  tax_invoice_count_mtd: number;
+  tax_invoice_count_all: number;
+  taxable_minor_mtd: number;
+  gst_minor_mtd: number;
+  total_minor_mtd: number;
+  cgst_minor_mtd: number;
+  sgst_minor_mtd: number;
+  igst_minor_mtd: number;
+  taxable_minor_all: number;
+  gst_minor_all: number;
+  total_minor_all: number;
+  open_proforma_count: number;
+  open_proforma_total_minor: number;
+  success_without_invoice_count: number;
+  currency: "INR";
+}
+
+export interface AdminSubscriptionRow {
+  user_id: string;
+  email: string | null;
+  company: string | null;
+  plan_id: string;
+  plan_name: string | null;
+  status: SubscriptionStatus;
+  current_period_start: string;
+  current_period_end: string;
+  grace_ends_at: string;
+  pending_plan_id: string | null;
+  credits: number | null;
+  is_in_buffer: boolean;
+  days_to_lapse: number | null;
+  mrr_minor_units: number;
+}
+
+export interface PaginatedSubscriptions {
+  rows: AdminSubscriptionRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface PlanMixEntry {
+  plan_id: string;
+  plan_name: string | null;
+  count: number;
+  mrr_minor_units: number;
+}
+
+export interface SubscriptionsKpis {
+  mrr_minor_units: number;
+  arr_minor_units: number;
+  currency: "INR";
+  paying_count: number;
+  past_due_count: number;
+  expired_count: number;
+  cancelled_count: number;
+  no_subscription_count: number;
+  lapsing_soon_count: number;
+  plan_mix: PlanMixEntry[];
+}
+
 export interface UserDetail {
   user: AdminUserRow;
   role: string | null;
   use_case: string | null;
   status_reason: string | null;
+  /** Open flags only (for review alerts); capped for safety. */
   flags: FlaggedAccountRow[];
-  moderation_actions: ModerationActionRow[];
+  flags_total: number;
   lists: { id: string; name: string; kind: string; created_at: string }[];
   lists_total: number;
   payments: PaymentRow[];
   payments_total: number;
+  subscription: AdminSubscriptionSummary | null;
+  billing_profile: AdminBillingProfileSummary | null;
+  invoices: AdminInvoiceRow[];
+  invoices_total: number;
 }
 
 export interface RunRow {

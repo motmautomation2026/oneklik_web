@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { findPack } from "../lib/creditPacks.js";
 import {
   AUTO_CLOSE_RESOLVED_AFTER_DAYS,
   AWAITING_REPLY_HOURS,
@@ -10,6 +11,9 @@ import {
   type TicketStatus,
 } from "../support/types.js";
 import type { AccountStatus } from "./types.js";
+import { ExportTooLargeError, MAX_EXPORT_ROWS } from "./exportLimits.js";
+
+export { ExportTooLargeError, MAX_EXPORT_ROWS } from "./exportLimits.js";
 
 // Admin-side ticket access. Kept in its own module rather than appended to the
 // already-long admin/queries.ts, but following the same conventions: service
@@ -84,9 +88,20 @@ export interface AdminTicketDetail extends AdminTicketRow {
     company: string | null;
     available_balance: number;
     other_ticket_count: number;
+    subscription: {
+      plan_id: string;
+      plan_name: string | null;
+      status: string;
+      current_period_end: string;
+      grace_ends_at: string;
+    } | null;
   };
   messages: AdminTicketMessage[];
+  messages_total: number;
+  messages_has_more: boolean;
   events: AdminTicketEvent[];
+  events_total: number;
+  events_has_more: boolean;
 }
 
 export interface SupportKpis {
@@ -98,51 +113,56 @@ export interface SupportKpis {
 }
 
 // ── email resolution ────────────────────────────────────────────────────
-// profiles has no email column, so every display email comes from GoTrue. One
-// lookup per DISTINCT id, not per row — the same de-duplication as
-// resolveActorEmails in admin/queries.ts.
-//
-// Fine for a 25-row page. NOT fine for an export: see resolveEmailsBulk.
+// Prefer the profiles.email mirror (synced from auth.users). One lookup per
+// DISTINCT id. Fine for a 25-row page. For large exports, resolveEmailsBulk
+// pages profiles instead of GoTrue.
 async function resolveEmails(ids: (string | null)[]): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
   const distinct = [...new Set(ids.filter((id): id is string => Boolean(id)))];
-  await Promise.all(
-    distinct.map(async (id) => {
-      const { data } = await supabaseAdmin.auth.admin.getUserById(id);
-      map.set(id, data.user?.email ?? null);
-    }),
-  );
+  if (distinct.length === 0) return map;
+
+  const { data, error } = await supabaseAdmin.from("profiles").select("id, email").in("id", distinct);
+  if (error) throw error;
+  for (const row of (data ?? []) as { id: string; email: string | null }[]) {
+    map.set(row.id, row.email);
+  }
+  for (const id of distinct) {
+    if (!map.has(id)) map.set(id, null);
+  }
   return map;
 }
 
-const GOTRUE_PAGE_SIZE = 1000;
-const GOTRUE_MAX_PAGES = 20;
+const PROFILE_EMAIL_PAGE_SIZE = 1000;
+const PROFILE_EMAIL_MAX_PAGES = 20;
 
-// Above this many distinct users, one sweep of the GoTrue user list is cheaper
-// and far kinder to rate limits than a getUserById per user. 25 is roughly
-// where the two cross over for a single admin page.
+// Above this many distinct users, one sweep of profiles is cheaper than a
+// single huge .in() — same threshold idea as the old GoTrue bulk path.
 const BULK_EMAIL_THRESHOLD = 25;
 
-// Export-safe email resolution. Firing hundreds of parallel getUserById calls
-// (which is what the per-page helper above would do over an export-sized set)
-// invites GoTrue rate limiting and socket exhaustion. Past a threshold this
-// pages through the user list once instead — at most GOTRUE_MAX_PAGES requests
-// no matter how many tickets are being exported.
 async function resolveEmailsBulk(ids: (string | null)[]): Promise<Map<string, string | null>> {
   const distinct = new Set(ids.filter((id): id is string => Boolean(id)));
   if (distinct.size === 0) return new Map();
   if (distinct.size <= BULK_EMAIL_THRESHOLD) return resolveEmails([...distinct]);
 
   const map = new Map<string, string | null>();
-  for (let page = 1; page <= GOTRUE_MAX_PAGES; page++) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: GOTRUE_PAGE_SIZE });
+  let from = 0;
+  for (let page = 0; page < PROFILE_EMAIL_MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email")
+      .range(from, from + PROFILE_EMAIL_PAGE_SIZE - 1);
     if (error) throw error;
-    const users = "users" in data ? data.users : [];
-    for (const user of users) {
-      if (distinct.has(user.id)) map.set(user.id, user.email ?? null);
+    const rows = (data ?? []) as { id: string; email: string | null }[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      if (distinct.has(row.id)) map.set(row.id, row.email);
     }
-    if (users.length < GOTRUE_PAGE_SIZE) break;
+    if (rows.length < PROFILE_EMAIL_PAGE_SIZE) break;
     if (map.size === distinct.size) break;
+    from += PROFILE_EMAIL_PAGE_SIZE;
+  }
+  for (const id of distinct) {
+    if (!map.has(id)) map.set(id, null);
   }
   return map;
 }
@@ -294,14 +314,6 @@ export async function getSupportTickets(params: GetSupportTicketsParams): Promis
 }
 
 const EXPORT_PAGE_SIZE = 1000;
-export const MAX_EXPORT_ROWS = 10_000;
-
-export class ExportTooLargeError extends Error {
-  constructor(public readonly total: number) {
-    super(`Export would contain ${total} tickets, above the ${MAX_EXPORT_ROWS} row limit`);
-    this.name = "ExportTooLargeError";
-  }
-}
 
 // Paginates properly rather than taking the first page and calling it the
 // answer. The previous version asked for a single 1000-row page, so an export
@@ -436,6 +448,135 @@ export async function getSupportBadgeCount(): Promise<number> {
 
 // ── detail ──────────────────────────────────────────────────────────────
 
+export const SUPPORT_THREAD_PAGE_SIZE = 50;
+
+async function loadTicketMessages(
+  ticketId: string,
+  before: string | null,
+  limit: number,
+): Promise<{ messages: AdminTicketMessage[]; has_more: boolean }> {
+  let query = supabaseAdmin
+    .from("support_messages")
+    .select("id, author_id, author_role, body, is_internal, created_at")
+    .eq("ticket_id", ticketId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
+
+  if (before) {
+    query = query.lt("created_at", before);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = (data ?? []) as any[];
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  // Chronological for the conversation UI (oldest → newest within the page).
+  page.reverse();
+
+  const messageIds = page.map((m) => m.id as string);
+  let attachmentRows: any[] = [];
+  if (messageIds.length > 0) {
+    const { data: attachments, error: attError } = await supabaseAdmin
+      .from("support_attachments")
+      .select("id, message_id, filename, mime, size_bytes")
+      .eq("ticket_id", ticketId)
+      .in("message_id", messageIds);
+    if (attError) throw attError;
+    attachmentRows = attachments ?? [];
+  }
+
+  const byMessage = new Map<string, AdminTicketMessage["attachments"]>();
+  for (const a of attachmentRows) {
+    if (!a.message_id) continue;
+    const list = byMessage.get(a.message_id) ?? [];
+    list.push({ id: a.id, filename: a.filename, mime: a.mime, size_bytes: a.size_bytes });
+    byMessage.set(a.message_id, list);
+  }
+
+  const emails = await resolveEmails(page.map((m) => m.author_id as string | null));
+
+  return {
+    has_more: hasMore,
+    messages: page.map((m) => ({
+      id: m.id,
+      author_id: m.author_id,
+      author_role: m.author_role,
+      author_email: m.author_id ? emails.get(m.author_id) ?? null : null,
+      body: m.body,
+      is_internal: m.is_internal,
+      created_at: m.created_at,
+      attachments: byMessage.get(m.id) ?? [],
+    })),
+  };
+}
+
+async function loadTicketEvents(
+  ticketId: string,
+  before: string | null,
+  limit: number,
+): Promise<{ events: AdminTicketEvent[]; has_more: boolean }> {
+  let query = supabaseAdmin
+    .from("support_events")
+    .select("id, actor_id, actor_role, event_type, from_value, to_value, note, created_at")
+    .eq("ticket_id", ticketId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit + 1);
+
+  if (before) {
+    query = query.lt("created_at", before);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = (data ?? []) as any[];
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  page.reverse();
+
+  const emails = await resolveEmails(page.map((e) => e.actor_id as string | null));
+
+  return {
+    has_more: hasMore,
+    events: page.map((e) => ({
+      id: e.id,
+      actor_role: e.actor_role,
+      actor_email: e.actor_id ? emails.get(e.actor_id) ?? null : null,
+      event_type: e.event_type,
+      from_value: e.from_value,
+      to_value: e.to_value,
+      note: e.note,
+      created_at: e.created_at,
+    })),
+  };
+}
+
+export async function getSupportTicketMessages(
+  ticketId: string,
+  before: string | null,
+  limit = SUPPORT_THREAD_PAGE_SIZE,
+): Promise<{ messages: AdminTicketMessage[]; has_more: boolean } | null> {
+  const { data, error } = await supabaseAdmin.from("support_tickets").select("id").eq("id", ticketId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return loadTicketMessages(ticketId, before, limit);
+}
+
+export async function getSupportTicketEvents(
+  ticketId: string,
+  before: string | null,
+  limit = SUPPORT_THREAD_PAGE_SIZE,
+): Promise<{ events: AdminTicketEvent[]; has_more: boolean } | null> {
+  const { data, error } = await supabaseAdmin.from("support_tickets").select("id").eq("id", ticketId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return loadTicketEvents(ticketId, before, limit);
+}
+
 export async function getSupportTicketDetail(ticketId: string): Promise<AdminTicketDetail | null> {
   const { data, error } = await supabaseAdmin
     .from("support_tickets")
@@ -447,51 +588,42 @@ export async function getSupportTicketDetail(ticketId: string): Promise<AdminTic
 
   const row = data as any;
 
-  const [{ data: profile }, { data: wallet }, { count: otherTickets }, { data: messages }, { data: attachments }, { data: events }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("profiles")
-        .select("account_status, suspended_until, status_reason, support_muted_until, company")
-        .eq("id", row.user_id)
-        .maybeSingle(),
-      supabaseAdmin.from("credit_wallets").select("available_balance").eq("user_id", row.user_id).maybeSingle(),
-      supabaseAdmin
-        .from("support_tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", row.user_id)
-        .neq("id", ticketId),
-      supabaseAdmin
-        .from("support_messages")
-        .select("id, author_id, author_role, body, is_internal, created_at")
-        .eq("ticket_id", ticketId)
-        .order("created_at", { ascending: true }),
-      supabaseAdmin
-        .from("support_attachments")
-        .select("id, message_id, filename, mime, size_bytes")
-        .eq("ticket_id", ticketId),
-      supabaseAdmin
-        .from("support_events")
-        .select("id, actor_id, actor_role, event_type, from_value, to_value, note, created_at")
-        .eq("ticket_id", ticketId)
-        .order("created_at", { ascending: true }),
-    ]);
-
-  const messageRows = (messages ?? []) as any[];
-  const eventRows = (events ?? []) as any[];
-  const emails = await resolveEmails([
-    row.user_id,
-    row.assigned_to,
-    ...messageRows.map((m) => m.author_id),
-    ...eventRows.map((e) => e.actor_id),
+  const [
+    { data: profile },
+    { data: wallet },
+    { count: otherTickets },
+    messagePage,
+    eventPage,
+    messagesCountResult,
+    eventsCountResult,
+    { data: subscription },
+  ] = await Promise.all([
+    supabaseAdmin
+      .from("profiles")
+      .select("account_status, suspended_until, status_reason, support_muted_until, company")
+      .eq("id", row.user_id)
+      .maybeSingle(),
+    supabaseAdmin.from("credit_wallets").select("available_balance").eq("user_id", row.user_id).maybeSingle(),
+    supabaseAdmin
+      .from("support_tickets")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", row.user_id)
+      .neq("id", ticketId),
+    loadTicketMessages(ticketId, null, SUPPORT_THREAD_PAGE_SIZE),
+    loadTicketEvents(ticketId, null, SUPPORT_THREAD_PAGE_SIZE),
+    supabaseAdmin.from("support_messages").select("id", { count: "exact", head: true }).eq("ticket_id", ticketId),
+    supabaseAdmin.from("support_events").select("id", { count: "exact", head: true }).eq("ticket_id", ticketId),
+    supabaseAdmin
+      .from("subscriptions")
+      .select("plan_id, status, current_period_end, grace_ends_at")
+      .eq("user_id", row.user_id)
+      .maybeSingle(),
   ]);
 
-  const byMessage = new Map<string, AdminTicketDetail["messages"][number]["attachments"]>();
-  for (const a of (attachments ?? []) as any[]) {
-    if (!a.message_id) continue;
-    const list = byMessage.get(a.message_id) ?? [];
-    list.push({ id: a.id, filename: a.filename, mime: a.mime, size_bytes: a.size_bytes });
-    byMessage.set(a.message_id, list);
-  }
+  if (messagesCountResult.error) throw messagesCountResult.error;
+  if (eventsCountResult.error) throw eventsCountResult.error;
+
+  const emails = await resolveEmails([row.user_id, row.assigned_to]);
 
   return {
     id: row.id,
@@ -525,27 +657,22 @@ export async function getSupportTicketDetail(ticketId: string): Promise<AdminTic
       company: profile?.company ?? null,
       available_balance: wallet?.available_balance ?? 0,
       other_ticket_count: otherTickets ?? 0,
+      subscription: subscription
+        ? {
+            plan_id: subscription.plan_id as string,
+            plan_name: findPack(subscription.plan_id as string)?.name ?? null,
+            status: subscription.status as string,
+            current_period_end: subscription.current_period_end as string,
+            grace_ends_at: subscription.grace_ends_at as string,
+          }
+        : null,
     },
-    messages: messageRows.map((m) => ({
-      id: m.id,
-      author_id: m.author_id,
-      author_role: m.author_role,
-      author_email: m.author_id ? emails.get(m.author_id) ?? null : null,
-      body: m.body,
-      is_internal: m.is_internal,
-      created_at: m.created_at,
-      attachments: byMessage.get(m.id) ?? [],
-    })),
-    events: eventRows.map((e) => ({
-      id: e.id,
-      actor_role: e.actor_role,
-      actor_email: e.actor_id ? emails.get(e.actor_id) ?? null : null,
-      event_type: e.event_type,
-      from_value: e.from_value,
-      to_value: e.to_value,
-      note: e.note,
-      created_at: e.created_at,
-    })),
+    messages: messagePage.messages,
+    messages_total: messagesCountResult.count ?? 0,
+    messages_has_more: messagePage.has_more,
+    events: eventPage.events,
+    events_total: eventsCountResult.count ?? 0,
+    events_has_more: eventPage.has_more,
   };
 }
 

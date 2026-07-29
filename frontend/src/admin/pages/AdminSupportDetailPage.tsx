@@ -5,13 +5,16 @@ import {
   fetchAdmins,
   fetchSupportAttachmentUrl,
   fetchSupportTicket,
+  fetchSupportTicketEvents,
+  fetchSupportTicketMessages,
   markSupportTicketRead,
   patchSupportTicket,
   postSupportMessage,
   setSupportMute,
 } from "../api/adminApi";
 import SectionCard from "../components/SectionCard";
-import { ACCOUNT_STATUS_VARIANT, TICKET_PRIORITY_VARIANT, TICKET_STATUS_VARIANT } from "../badgeVariants";
+import { ACCOUNT_STATUS_VARIANT, SUBSCRIPTION_STATUS_VARIANT, TICKET_PRIORITY_VARIANT, TICKET_STATUS_VARIANT } from "../badgeVariants";
+
 import { formatDateTime, formatNumber } from "../format";
 import { useAdminResource } from "../hooks/useAdminResource";
 import { ADMIN_CHART_COLORS } from "../theme";
@@ -21,6 +24,7 @@ import {
   TICKET_STATUS_LABEL,
   TICKET_STATUSES,
   type AdminTicketDetail,
+  type AdminTicketEvent,
   type AdminTicketMessage,
   type TicketAttachment,
   type TicketPriority,
@@ -117,6 +121,13 @@ export default function AdminSupportDetailPage() {
 
   const ticket: AdminTicketDetail | null = ticketState.data;
 
+  const [messages, setMessages] = useState<AdminTicketMessage[]>([]);
+  const [messagesHasMore, setMessagesHasMore] = useState(false);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
+  const [events, setEvents] = useState<AdminTicketEvent[]>([]);
+  const [eventsHasMore, setEventsHasMore] = useState(false);
+  const [loadingOlderEvents, setLoadingOlderEvents] = useState(false);
+
   const [reply, setReply] = useState("");
   const [internal, setInternal] = useState(false);
   const [sending, setSending] = useState(false);
@@ -124,12 +135,61 @@ export default function AdminSupportDetailPage() {
   const [muteOpen, setMuteOpen] = useState(false);
   const [muteUntil, setMuteUntil] = useState("");
 
+  // Sync thread pages from the detail payload whenever the ticket reloads.
+  useEffect(() => {
+    if (!ticket) return;
+    setMessages(ticket.messages);
+    setMessagesHasMore(ticket.messages_has_more);
+    setEvents(ticket.events);
+    setEventsHasMore(ticket.events_has_more);
+  }, [ticket]);
+
   // Opening the thread is what marks it read for the team — the badge and the
   // queue's unread dot both key off admin_read_at.
   useEffect(() => {
     if (!ticket?.admin_unread) return;
     markSupportTicketRead(id).catch(() => undefined);
   }, [id, ticket?.admin_unread]);
+
+  async function loadOlderMessages() {
+    if (!messages.length || !messagesHasMore) return;
+    setLoadingOlderMessages(true);
+    setActionError(null);
+    try {
+      const oldest = messages[0];
+      const result = await fetchSupportTicketMessages(id, { before: oldest.created_at });
+      setMessages((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const older = result.messages.filter((m) => !seen.has(m.id));
+        return [...older, ...prev];
+      });
+      setMessagesHasMore(result.has_more);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not load older messages.");
+    } finally {
+      setLoadingOlderMessages(false);
+    }
+  }
+
+  async function loadOlderEvents() {
+    if (!events.length || !eventsHasMore) return;
+    setLoadingOlderEvents(true);
+    setActionError(null);
+    try {
+      const oldest = events[0];
+      const result = await fetchSupportTicketEvents(id, { before: oldest.created_at });
+      setEvents((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        const older = result.events.filter((e) => !seen.has(e.id));
+        return [...older, ...prev];
+      });
+      setEventsHasMore(result.has_more);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not load older events.");
+    } finally {
+      setLoadingOlderEvents(false);
+    }
+  }
 
   async function handleSend() {
     const body = reply.trim();
@@ -232,9 +292,28 @@ export default function AdminSupportDetailPage() {
       <div className="row g-3">
         <div className="col-12 col-lg-8">
           <SectionCard title="Conversation" loading={false} error={null}>
-            {ticket.messages.map((m) => (
+            {messagesHasMore && (
+              <div className="text-center mb-3">
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  disabled={loadingOlderMessages}
+                  onClick={loadOlderMessages}
+                >
+                  {loadingOlderMessages
+                    ? "Loading…"
+                    : `Load older messages (${ticket.messages_total - messages.length} more)`}
+                </Button>
+              </div>
+            )}
+            {messages.map((m) => (
               <Message key={m.id} message={m} />
             ))}
+            {messages.length === 0 && (
+              <div className="small mb-3" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                No messages yet.
+              </div>
+            )}
 
             {/* The composer's own chrome changes with the mode. A checkbox
                 alone is too easy to miss; sending an internal note to a
@@ -324,6 +403,31 @@ export default function AdminSupportDetailPage() {
                   </div>
                 )}
                 <div className="mb-2">Balance: {formatNumber(ticket.requester.available_balance)} credits</div>
+                {ticket.requester.subscription ? (
+                  <div className="mb-2">
+                    <div className="d-flex align-items-center gap-2 flex-wrap mb-1">
+                      <Badge bg="primary">
+                        {ticket.requester.subscription.plan_name ?? ticket.requester.subscription.plan_id}
+                      </Badge>
+                      <Badge
+                        bg={
+                          SUBSCRIPTION_STATUS_VARIANT[ticket.requester.subscription.status] ?? "secondary"
+                        }
+                      >
+                        {ticket.requester.subscription.status}
+                      </Badge>
+                    </div>
+                    <div style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+                      Period ends {formatDateTime(ticket.requester.subscription.current_period_end)}
+                      <br />
+                      Buffer until {formatDateTime(ticket.requester.subscription.grace_ends_at)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                    No subscription
+                  </div>
+                )}
                 <div className="mb-2">Other tickets: {formatNumber(ticket.requester.other_ticket_count)}</div>
 
                 {ticket.requester.account_status !== "active" && (
@@ -400,14 +504,23 @@ export default function AdminSupportDetailPage() {
             </SectionCard>
           </div>
 
-          <SectionCard title="History" loading={false} error={null}>
-            {ticket.events.length === 0 ? (
+          <SectionCard title={`History (${ticket.events_total})`} loading={false} error={null}>
+            {eventsHasMore && (
+              <div className="mb-2">
+                <Button size="sm" variant="outline-secondary" disabled={loadingOlderEvents} onClick={loadOlderEvents}>
+                  {loadingOlderEvents
+                    ? "Loading…"
+                    : `Load older (${ticket.events_total - events.length} more)`}
+                </Button>
+              </div>
+            )}
+            {events.length === 0 ? (
               <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
                 Nothing yet.
               </div>
             ) : (
               <ul className="list-unstyled mb-0 small">
-                {ticket.events.map((e) => (
+                {events.map((e) => (
                   <li key={e.id} className="mb-2">
                     <div style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
                       {e.event_type.replace(/_/g, " ")}

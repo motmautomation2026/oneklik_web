@@ -33,6 +33,9 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   getAdminInvoiceById,
+  getAllInvoicesForExport,
+  getInvoices,
+  getInvoicesKpis,
   getSubscriptions,
   getSubscriptionsKpis,
 } from "./billingQueries.js";
@@ -67,7 +70,10 @@ import {
 } from "../support/types.js";
 import type {
   AccountStatus,
+  AdminInvoiceListRow,
   FlaggedStatus,
+  InvoiceDocumentType,
+  InvoiceStatus,
   ModerationAction,
   PaymentRow,
   PaymentStatus,
@@ -274,6 +280,8 @@ router.get("/transactions/export", async (req: Request, res: Response) => {
         { header: "Credits promised", value: (r) => r.credits_promised },
         { header: "Gateway", value: (r) => r.gateway },
         { header: "Gateway payment id", value: (r) => r.gateway_payment_id ?? "" },
+        { header: "Invoice number", value: (r) => r.invoice_number ?? "" },
+        { header: "Receipt number", value: (r) => r.receipt_number ?? "" },
         { header: "Created", value: (r) => r.created_at },
         { header: "Updated", value: (r) => r.updated_at },
       ],
@@ -350,6 +358,21 @@ function planIdParam(value: unknown): string | undefined {
   return v;
 }
 
+const INVOICE_DOCUMENT_TYPES: InvoiceDocumentType[] = ["tax_invoice", "credit_note", "proforma_invoice"];
+const INVOICE_STATUSES: InvoiceStatus[] = ["issued", "cancelled", "paid", "void"];
+
+function invoiceDocumentTypeParam(value: unknown): InvoiceDocumentType | undefined {
+  return typeof value === "string" && (INVOICE_DOCUMENT_TYPES as string[]).includes(value)
+    ? (value as InvoiceDocumentType)
+    : undefined;
+}
+
+function invoiceStatusParam(value: unknown): InvoiceStatus | undefined {
+  return typeof value === "string" && (INVOICE_STATUSES as string[]).includes(value)
+    ? (value as InvoiceStatus)
+    : undefined;
+}
+
 // Literal /subscriptions/kpis before any future /subscriptions/:id.
 router.get("/subscriptions/kpis", async (req: Request, res: Response) => {
   try {
@@ -374,6 +397,97 @@ router.get("/subscriptions", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "admin: failed to load subscriptions");
     return res.status(500).json({ error: "Could not load subscriptions" });
+  }
+});
+
+// Literal /invoices/kpis and /invoices/export before /invoices/:id.
+router.get("/invoices/kpis", async (_req: Request, res: Response) => {
+  try {
+    const kpis = await getInvoicesKpis();
+    return res.json(kpis);
+  } catch (err) {
+    _req.log.error({ err }, "admin: failed to load invoice KPIs");
+    return res.status(500).json({ error: "Could not load invoice KPIs" });
+  }
+});
+
+router.get("/invoices/export", async (req: Request, res: Response) => {
+  const documentType = invoiceDocumentTypeParam(req.query.documentType);
+  const status = invoiceStatusParam(req.query.status);
+  const search = stringParam(req.query.search);
+  const planId = planIdParam(req.query.planId);
+  const financialYear = stringParam(req.query.financialYear);
+  const issuedFrom = stringParam(req.query.issuedFrom);
+  const issuedTo = stringParam(req.query.issuedTo);
+  try {
+    const rows = await getAllInvoicesForExport({
+      documentType,
+      status,
+      search,
+      planId,
+      financialYear,
+      issuedFrom,
+      issuedTo,
+    });
+    const csv = rowsToCsv<AdminInvoiceListRow>(
+      [
+        { header: "Issued at", value: (r) => r.issued_at },
+        { header: "Document type", value: (r) => r.document_type },
+        { header: "Invoice number", value: (r) => r.invoice_number },
+        { header: "Receipt number", value: (r) => r.receipt_number ?? "" },
+        { header: "Status", value: (r) => r.status },
+        { header: "Email", value: (r) => r.email ?? r.user_id },
+        { header: "Buyer legal name", value: (r) => r.buyer_legal_name ?? "" },
+        { header: "Buyer GSTIN", value: (r) => r.buyer_gstin ?? "" },
+        { header: "Plan", value: (r) => r.plan_name ?? r.pack_id ?? "" },
+        { header: "Billing intent", value: (r) => r.billing_intent ?? "" },
+        { header: "Financial year", value: (r) => r.financial_year },
+        { header: "Series", value: (r) => r.series },
+        { header: "Taxable (minor units)", value: (r) => r.taxable_value_minor },
+        { header: "CGST (minor units)", value: (r) => r.cgst_minor },
+        { header: "SGST (minor units)", value: (r) => r.sgst_minor },
+        { header: "IGST (minor units)", value: (r) => r.igst_minor },
+        { header: "Total (minor units)", value: (r) => r.total_minor },
+        { header: "Currency", value: (r) => r.currency },
+        { header: "Razorpay capture id", value: (r) => r.gateway_capture_id ?? "" },
+        { header: "Payment id", value: (r) => r.payment_id ?? "" },
+        { header: "Due date", value: (r) => r.due_date ?? "" },
+      ],
+      rows,
+    );
+    return sendCsv(res, "invoices.csv", csv);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to export invoices");
+    return res.status(500).json({ error: "Could not export invoices" });
+  }
+});
+
+router.get("/invoices", async (req: Request, res: Response) => {
+  const page = clampInt(req.query.page, 1, 1, 100_000);
+  const pageSize = clampInt(req.query.pageSize, 25, 1, 100);
+  const documentType = invoiceDocumentTypeParam(req.query.documentType);
+  const status = invoiceStatusParam(req.query.status);
+  const search = stringParam(req.query.search);
+  const planId = planIdParam(req.query.planId);
+  const financialYear = stringParam(req.query.financialYear);
+  const issuedFrom = stringParam(req.query.issuedFrom);
+  const issuedTo = stringParam(req.query.issuedTo);
+  try {
+    const result = await getInvoices({
+      page,
+      pageSize,
+      documentType,
+      status,
+      search,
+      planId,
+      financialYear,
+      issuedFrom,
+      issuedTo,
+    });
+    return res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load invoices");
+    return res.status(500).json({ error: "Could not load invoices" });
   }
 });
 

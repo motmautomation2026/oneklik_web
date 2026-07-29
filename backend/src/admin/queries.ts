@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
-import { fetchUserBillingBundle, getSubscriptionHintsByUserIds } from "./billingQueries.js";
+import { fetchUserBillingBundle, getInvoiceHintsByPaymentIds, getSubscriptionHintsByUserIds } from "./billingQueries.js";
 import type {
   AccountStatus,
   AdminAccountRow,
@@ -624,7 +624,19 @@ export async function getTransactions({
   const rows = (data ?? []) as RawPaymentRow[];
 
   const withEmails = await attachEmails(rows);
-  return { rows: withEmails as PaymentRow[], total: count ?? 0, page, page_size: pageSize };
+  const invoiceHints = await getInvoiceHintsByPaymentIds(rows.map((r) => r.id));
+  const withInvoices: PaymentRow[] = withEmails.map((row) => {
+    const hint = invoiceHints.get(row.id);
+    return {
+      ...row,
+      billing_intent: row.billing_intent ?? null,
+      pack_id: row.pack_id ?? null,
+      invoice_id: hint?.invoice_id ?? null,
+      invoice_number: hint?.invoice_number ?? null,
+      receipt_number: hint?.receipt_number ?? null,
+    };
+  });
+  return { rows: withInvoices, total: count ?? 0, page, page_size: pageSize };
 }
 
 // Same filtering as getTransactions, but scans every matching page (bounded
@@ -647,7 +659,19 @@ export async function getAllTransactionsForExport({
     },
     (row) => rows.push(row),
   );
-  return (await attachEmails(rows)) as PaymentRow[];
+  const withEmails = await attachEmails(rows);
+  const invoiceHints = await getInvoiceHintsByPaymentIds(rows.map((r) => r.id));
+  return withEmails.map((row) => {
+    const hint = invoiceHints.get(row.id);
+    return {
+      ...row,
+      billing_intent: row.billing_intent ?? null,
+      pack_id: row.pack_id ?? null,
+      invoice_id: hint?.invoice_id ?? null,
+      invoice_number: hint?.invoice_number ?? null,
+      receipt_number: hint?.receipt_number ?? null,
+    };
+  });
 }
 
 // Deliberately scoped by search only, not the status dropdown — filtering to
@@ -848,12 +872,20 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
 
   // All rows here belong to the one user already looked up above — no need
   // to pay for attachEmails' per-row getUserById lookups.
-  const payments: PaymentRow[] = ((paymentResult.data ?? []) as RawPaymentRow[]).map((p) => ({
-    ...p,
-    email,
-    billing_intent: p.billing_intent ?? null,
-    pack_id: p.pack_id ?? null,
-  }));
+  const rawPayments = (paymentResult.data ?? []) as RawPaymentRow[];
+  const invoiceHints = await getInvoiceHintsByPaymentIds(rawPayments.map((p) => p.id));
+  const payments: PaymentRow[] = rawPayments.map((p) => {
+    const hint = invoiceHints.get(p.id);
+    return {
+      ...p,
+      email,
+      billing_intent: p.billing_intent ?? null,
+      pack_id: p.pack_id ?? null,
+      invoice_id: hint?.invoice_id ?? null,
+      invoice_number: hint?.invoice_number ?? null,
+      receipt_number: hint?.receipt_number ?? null,
+    };
+  });
 
   return {
     user,

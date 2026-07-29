@@ -3,9 +3,14 @@ import { CREDIT_PACKS, findPack } from "../lib/creditPacks.js";
 import type { InvoiceRow } from "../lib/issueInvoice.js";
 import type {
   AdminBillingProfileSummary,
+  AdminInvoiceListRow,
   AdminInvoiceRow,
   AdminSubscriptionRow,
   AdminSubscriptionSummary,
+  InvoiceDocumentType,
+  InvoiceStatus,
+  InvoicesKpis,
+  PaginatedInvoices,
   PaginatedSubscriptions,
   PlanMixEntry,
   SubscriptionStatus,
@@ -21,6 +26,11 @@ const SUBSCRIPTION_SELECT =
 
 const INVOICE_LIST_SELECT =
   "id, invoice_number, document_type, status, total_minor, currency, issued_at, due_date, series, receipt_number";
+
+const INVOICE_DIRECTORY_SELECT =
+  "id, user_id, payment_id, invoice_number, receipt_number, document_type, status, taxable_value_minor, cgst_minor, sgst_minor, igst_minor, total_minor, currency, issued_at, due_date, series, financial_year, buyer_snapshot, payment_snapshot";
+
+const NO_MATCH_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 const BILLING_PROFILE_SELECT =
   "legal_name, entity_type, gstin, address_line1, address_line2, city, state_code, state_name, postal_code, country";
@@ -430,6 +440,392 @@ export async function getAdminInvoiceById(invoiceId: string): Promise<InvoiceRow
   const { data, error } = await supabaseAdmin.from("invoices").select("*").eq("id", invoiceId).maybeSingle();
   if (error) throw error;
   return (data as InvoiceRow | null) ?? null;
+}
+
+interface RawInvoiceDirectoryRow {
+  id: string;
+  user_id: string;
+  payment_id: string | null;
+  invoice_number: string;
+  receipt_number: string | null;
+  document_type: string;
+  status: string;
+  taxable_value_minor: number;
+  cgst_minor: number;
+  sgst_minor: number;
+  igst_minor: number;
+  total_minor: number;
+  currency: string;
+  issued_at: string;
+  due_date: string | null;
+  series: string;
+  financial_year: string;
+  buyer_snapshot: Record<string, unknown> | null;
+  payment_snapshot: Record<string, unknown> | null;
+}
+
+function snapshotString(snap: Record<string, unknown> | null | undefined, key: string): string | null {
+  const v = snap?.[key];
+  return typeof v === "string" && v.trim() ? v : null;
+}
+
+interface GetInvoicesParams {
+  page: number;
+  pageSize: number;
+  documentType?: InvoiceDocumentType;
+  status?: InvoiceStatus;
+  search?: string;
+  planId?: string;
+  financialYear?: string;
+  issuedFrom?: string;
+  issuedTo?: string;
+}
+
+type InvoicesSearchFilter =
+  | { type: "ids"; ids: string[] }
+  | { type: "doc"; term: string }
+  | { type: "none" };
+
+async function resolveInvoicesSearchFilter(search?: string): Promise<InvoicesSearchFilter> {
+  const trimmed = search?.trim();
+  if (!trimmed) return { type: "none" };
+  if (trimmed.includes("@")) {
+    const ids = await findUserIdsByEmailSubstring(trimmed);
+    return { type: "ids", ids: Array.from(ids) };
+  }
+  return { type: "doc", term: trimmed };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyInvoicesSearchFilter(query: any, filter: InvoicesSearchFilter): any {
+  if (filter.type === "ids") {
+    return filter.ids.length > 0 ? query.in("user_id", filter.ids) : query.eq("user_id", NO_MATCH_USER_ID);
+  }
+  if (filter.type === "doc") {
+    const t = filter.term.replace(/%/g, "");
+    // invoice #, receipt #, buyer legal name, or GSTIN
+    return query.or(
+      `invoice_number.ilike.%${t}%,receipt_number.ilike.%${t}%,buyer_snapshot->>legal_name.ilike.%${t}%,buyer_snapshot->>gstin.ilike.%${t}%`,
+    );
+  }
+  return query;
+}
+
+async function paymentIdsForPlan(planId: string): Promise<string[]> {
+  const ids: string[] = [];
+  let from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .select("id")
+      .eq("pack_id", planId)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as { id: string }[];
+    if (rows.length === 0) break;
+    for (const row of rows) ids.push(row.id);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return ids;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function applyInvoiceDirectoryFilters(
+  query: any,
+  params: Omit<GetInvoicesParams, "page" | "pageSize">,
+  searchFilter: InvoicesSearchFilter,
+): Promise<any> {
+  let q = applyInvoicesSearchFilter(query, searchFilter);
+  if (params.documentType) q = q.eq("document_type", params.documentType);
+  if (params.status) q = q.eq("status", params.status);
+  if (params.financialYear) q = q.eq("financial_year", params.financialYear);
+  if (params.issuedFrom) q = q.gte("issued_at", params.issuedFrom);
+  if (params.issuedTo) q = q.lte("issued_at", params.issuedTo);
+  if (params.planId) {
+    const paymentIds = await paymentIdsForPlan(params.planId);
+    q = paymentIds.length > 0 ? q.in("payment_id", paymentIds) : q.eq("payment_id", NO_MATCH_USER_ID);
+  }
+  return q;
+}
+
+async function attachPaymentHints(
+  rows: RawInvoiceDirectoryRow[],
+): Promise<
+  Map<string, { pack_id: string | null; billing_intent: string | null; gateway_capture_id: string | null }>
+> {
+  const map = new Map<
+    string,
+    { pack_id: string | null; billing_intent: string | null; gateway_capture_id: string | null }
+  >();
+  const paymentIds = rows.map((r) => r.payment_id).filter((id): id is string => Boolean(id));
+  if (paymentIds.length === 0) return map;
+
+  const { data, error } = await supabaseAdmin
+    .from("payments")
+    .select("id, pack_id, billing_intent, gateway_capture_id")
+    .in("id", paymentIds);
+  if (error) throw error;
+
+  for (const p of (data ?? []) as {
+    id: string;
+    pack_id: string | null;
+    billing_intent: string | null;
+    gateway_capture_id: string | null;
+  }[]) {
+    map.set(p.id, {
+      pack_id: p.pack_id,
+      billing_intent: p.billing_intent,
+      gateway_capture_id: p.gateway_capture_id,
+    });
+  }
+  return map;
+}
+
+function toAdminInvoiceListRow(
+  row: RawInvoiceDirectoryRow & { email: string | null },
+  paymentHint: { pack_id: string | null; billing_intent: string | null; gateway_capture_id: string | null } | null,
+): AdminInvoiceListRow {
+  const packId = paymentHint?.pack_id ?? null;
+  const captureFromSnap = snapshotString(row.payment_snapshot, "razorpay_payment_id");
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    email: row.email,
+    invoice_number: row.invoice_number,
+    receipt_number: row.receipt_number,
+    document_type: row.document_type as InvoiceDocumentType,
+    status: row.status as InvoiceStatus,
+    taxable_value_minor: row.taxable_value_minor,
+    cgst_minor: row.cgst_minor,
+    sgst_minor: row.sgst_minor,
+    igst_minor: row.igst_minor,
+    total_minor: row.total_minor,
+    currency: row.currency,
+    issued_at: row.issued_at,
+    due_date: row.due_date,
+    series: row.series,
+    financial_year: row.financial_year,
+    buyer_legal_name: snapshotString(row.buyer_snapshot, "legal_name"),
+    buyer_gstin: snapshotString(row.buyer_snapshot, "gstin"),
+    payment_id: row.payment_id,
+    pack_id: packId,
+    plan_name: packId ? planName(packId) : null,
+    billing_intent: paymentHint?.billing_intent ?? null,
+    gateway_capture_id: paymentHint?.gateway_capture_id ?? captureFromSnap,
+  };
+}
+
+export async function getInvoices(params: GetInvoicesParams): Promise<PaginatedInvoices> {
+  const { page, pageSize } = params;
+  const from = (page - 1) * pageSize;
+  const searchFilter = await resolveInvoicesSearchFilter(params.search);
+
+  let query = await applyInvoiceDirectoryFilters(
+    supabaseAdmin
+      .from("invoices")
+      .select(INVOICE_DIRECTORY_SELECT, { count: "exact" })
+      .order("issued_at", { ascending: false })
+      .range(from, from + pageSize - 1),
+    params,
+    searchFilter,
+  );
+
+  const { data, error, count } = await query;
+  if (error) throw error;
+
+  const rawRows = (data ?? []) as RawInvoiceDirectoryRow[];
+  const [withEmails, paymentHints] = await Promise.all([attachEmails(rawRows), attachPaymentHints(rawRows)]);
+
+  const rows = withEmails.map((row) =>
+    toAdminInvoiceListRow(row, row.payment_id ? paymentHints.get(row.payment_id) ?? null : null),
+  );
+
+  return { rows, total: count ?? 0, page, page_size: pageSize };
+}
+
+export async function getAllInvoicesForExport(
+  params: Omit<GetInvoicesParams, "page" | "pageSize">,
+): Promise<AdminInvoiceListRow[]> {
+  const searchFilter = await resolveInvoicesSearchFilter(params.search);
+  const all: RawInvoiceDirectoryRow[] = [];
+  let from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let query = await applyInvoiceDirectoryFilters(
+      supabaseAdmin
+        .from("invoices")
+        .select(INVOICE_DIRECTORY_SELECT)
+        .order("issued_at", { ascending: false })
+        .range(from, from + PAGE_SIZE - 1),
+      params,
+      searchFilter,
+    );
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = (data ?? []) as RawInvoiceDirectoryRow[];
+    if (rows.length === 0) break;
+    all.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  const [withEmails, paymentHints] = await Promise.all([attachEmails(all), attachPaymentHints(all)]);
+  return withEmails.map((row) =>
+    toAdminInvoiceListRow(row, row.payment_id ? paymentHints.get(row.payment_id) ?? null : null),
+  );
+}
+
+function monthStartIso(now = new Date()): string {
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+}
+
+export async function getInvoicesKpis(): Promise<InvoicesKpis> {
+  const mtdIso = monthStartIso();
+
+  const taxSelect =
+    "taxable_value_minor, cgst_minor, sgst_minor, igst_minor, total_minor, issued_at, document_type, status";
+
+  let taxableMtd = 0;
+  let cgstMtd = 0;
+  let sgstMtd = 0;
+  let igstMtd = 0;
+  let totalMtd = 0;
+  let taxCountMtd = 0;
+  let taxableAll = 0;
+  let gstAll = 0;
+  let totalAll = 0;
+  let taxCountAll = 0;
+  let openProformaCount = 0;
+  let openProformaTotal = 0;
+
+  let from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .select(taxSelect)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as {
+      taxable_value_minor: number;
+      cgst_minor: number;
+      sgst_minor: number;
+      igst_minor: number;
+      total_minor: number;
+      issued_at: string;
+      document_type: string;
+      status: string;
+    }[];
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      if (row.document_type === "tax_invoice" && row.status !== "cancelled" && row.status !== "void") {
+        taxCountAll += 1;
+        taxableAll += row.taxable_value_minor;
+        gstAll += row.cgst_minor + row.sgst_minor + row.igst_minor;
+        totalAll += row.total_minor;
+        if (row.issued_at >= mtdIso) {
+          taxCountMtd += 1;
+          taxableMtd += row.taxable_value_minor;
+          cgstMtd += row.cgst_minor;
+          sgstMtd += row.sgst_minor;
+          igstMtd += row.igst_minor;
+          totalMtd += row.total_minor;
+        }
+      }
+      if (row.document_type === "proforma_invoice" && row.status === "issued") {
+        openProformaCount += 1;
+        openProformaTotal += row.total_minor;
+      }
+    }
+
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  // Success payments that never got a tax invoice — orphan / repair signal.
+  const invoicedPaymentIds = new Set<string>();
+  from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("invoices")
+      .select("payment_id")
+      .eq("document_type", "tax_invoice")
+      .not("payment_id", "is", null)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as { payment_id: string | null }[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      if (row.payment_id) invoicedPaymentIds.add(row.payment_id);
+    }
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  let successWithoutInvoice = 0;
+  from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("payments")
+      .select("id")
+      .eq("status", "success")
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as { id: string }[];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      if (!invoicedPaymentIds.has(row.id)) successWithoutInvoice += 1;
+    }
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return {
+    tax_invoice_count_mtd: taxCountMtd,
+    tax_invoice_count_all: taxCountAll,
+    taxable_minor_mtd: taxableMtd,
+    gst_minor_mtd: cgstMtd + sgstMtd + igstMtd,
+    total_minor_mtd: totalMtd,
+    cgst_minor_mtd: cgstMtd,
+    sgst_minor_mtd: sgstMtd,
+    igst_minor_mtd: igstMtd,
+    taxable_minor_all: taxableAll,
+    gst_minor_all: gstAll,
+    total_minor_all: totalAll,
+    open_proforma_count: openProformaCount,
+    open_proforma_total_minor: openProformaTotal,
+    success_without_invoice_count: successWithoutInvoice,
+    currency: "INR",
+  };
+}
+
+/** Batch lookup of invoice numbers for a page of payments (transactions cross-link). */
+export async function getInvoiceHintsByPaymentIds(
+  paymentIds: string[],
+): Promise<Map<string, { invoice_id: string; invoice_number: string; receipt_number: string | null }>> {
+  const map = new Map<string, { invoice_id: string; invoice_number: string; receipt_number: string | null }>();
+  if (paymentIds.length === 0) return map;
+
+  const { data, error } = await supabaseAdmin
+    .from("invoices")
+    .select("id, payment_id, invoice_number, receipt_number")
+    .in("payment_id", paymentIds)
+    .eq("document_type", "tax_invoice");
+  if (error) throw error;
+
+  for (const row of (data ?? []) as {
+    id: string;
+    payment_id: string;
+    invoice_number: string;
+    receipt_number: string | null;
+  }[]) {
+    map.set(row.payment_id, {
+      invoice_id: row.id,
+      invoice_number: row.invoice_number,
+      receipt_number: row.receipt_number,
+    });
+  }
+  return map;
 }
 
 export { BILLING_PROFILE_SELECT, INVOICE_LIST_SELECT, SUBSCRIPTION_SELECT };

@@ -13,7 +13,11 @@ import type {
   FeatureUsageResponse,
   FunnelStats,
   GrantUserCreditsResponse,
+  InvoiceDocumentType,
+  InvoiceStatus,
+  InvoicesKpis,
   ListsActivity,
+  PaginatedInvoices,
   PaginatedLedger,
   PaginatedLists,
   PaginatedRuns,
@@ -238,14 +242,127 @@ export function fetchSubscriptions({
   return apiGet<PaginatedSubscriptions>(`/api/admin/subscriptions?${params.toString()}`, signal);
 }
 
+export function fetchInvoicesKpis(signal?: AbortSignal): Promise<InvoicesKpis> {
+  return apiGet<InvoicesKpis>("/api/admin/invoices/kpis", signal);
+}
+
+export interface FetchInvoicesParams {
+  page: number;
+  pageSize: number;
+  documentType?: InvoiceDocumentType;
+  status?: InvoiceStatus;
+  search?: string;
+  planId?: string;
+  financialYear?: string;
+  issuedFrom?: string;
+  issuedTo?: string;
+  signal?: AbortSignal;
+}
+
+export function fetchInvoices({
+  page,
+  pageSize,
+  documentType,
+  status,
+  search,
+  planId,
+  financialYear,
+  issuedFrom,
+  issuedTo,
+  signal,
+}: FetchInvoicesParams): Promise<PaginatedInvoices> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (documentType) params.set("documentType", documentType);
+  if (status) params.set("status", status);
+  if (search) params.set("search", search);
+  if (planId) params.set("planId", planId);
+  if (financialYear) params.set("financialYear", financialYear);
+  if (issuedFrom) params.set("issuedFrom", issuedFrom);
+  if (issuedTo) params.set("issuedTo", issuedTo);
+  return apiGet<PaginatedInvoices>(`/api/admin/invoices?${params.toString()}`, signal);
+}
+
+export function exportInvoicesCsv(params: {
+  documentType?: InvoiceDocumentType;
+  status?: InvoiceStatus;
+  search?: string;
+  planId?: string;
+  financialYear?: string;
+  issuedFrom?: string;
+  issuedTo?: string;
+}): Promise<void> {
+  const query = new URLSearchParams();
+  if (params.documentType) query.set("documentType", params.documentType);
+  if (params.status) query.set("status", params.status);
+  if (params.search) query.set("search", params.search);
+  if (params.planId) query.set("planId", params.planId);
+  if (params.financialYear) query.set("financialYear", params.financialYear);
+  if (params.issuedFrom) query.set("issuedFrom", params.issuedFrom);
+  if (params.issuedTo) query.set("issuedTo", params.issuedTo);
+  const qs = query.toString();
+  return apiDownload(`/api/admin/invoices/export${qs ? `?${qs}` : ""}`, "invoices.csv");
+}
+
+function escapeHtmlAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Inject a sticky Download control into a document preview so Invoice/Receipt
+ *  open with both preview and download — no separate PDF action in the table. */
+function withDownloadToolbar(html: string, pdfUrl: string, filename: string, label: string): string {
+  const safeUrl = escapeHtmlAttr(pdfUrl);
+  const safeName = escapeHtmlAttr(filename);
+  const safeLabel = escapeHtmlAttr(label);
+  const toolbar = `
+<style>
+  .ok-admin-doc-toolbar {
+    position: sticky; top: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 16px;
+    background: #1a1a1a; color: #fff;
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 13px;
+  }
+  .ok-admin-doc-toolbar a {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: #563da4; color: #fff; text-decoration: none; font-weight: 600;
+  }
+  .ok-admin-doc-toolbar a:hover { background: #6b52c4; }
+  @media print { .ok-admin-doc-toolbar { display: none !important; } }
+</style>
+<div class="ok-admin-doc-toolbar">
+  <span>${safeLabel}</span>
+  <a href="${safeUrl}" download="${safeName}" target="_blank" rel="noopener">Download PDF</a>
+</div>`;
+
+  if (/<body[^>]*>/i.test(html)) {
+    return html.replace(/<body([^>]*)>/i, `<body$1>${toolbar}`);
+  }
+  return toolbar + html;
+}
+
 export async function openAdminInvoiceHtml(invoiceId: string, view?: string): Promise<void> {
   // Open synchronously on the click stack so popup blockers don't swallow the tab
   // after the await. Failures navigate the placeholder tab to about:blank and throw.
   const tab = window.open("about:blank", "_blank");
   const qs = view ? `?view=${encodeURIComponent(view)}` : "";
   try {
-    const html = await apiGetText(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/html${qs}`);
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const [html, pdf] = await Promise.all([
+      apiGetText(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/html${qs}`),
+      apiGet<{ url: string; filename: string }>(
+        `/api/admin/invoices/${encodeURIComponent(invoiceId)}/pdf${qs}`,
+      ),
+    ]);
+    const label =
+      view === "receipt" ? "Payment receipt" : view === "proforma" ? "Pro forma invoice" : "Tax invoice";
+    const withToolbar = withDownloadToolbar(html, pdf.url, pdf.filename, label);
+    const blob = new Blob([withToolbar], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     if (tab) {
       tab.location.href = url;
@@ -253,24 +370,6 @@ export async function openAdminInvoiceHtml(invoiceId: string, view?: string): Pr
       window.open(url, "_blank", "noopener,noreferrer");
     }
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } catch (err) {
-    tab?.close();
-    throw err;
-  }
-}
-
-export async function openAdminInvoicePdf(invoiceId: string, view?: string): Promise<void> {
-  const tab = window.open("about:blank", "_blank");
-  const qs = view ? `?view=${encodeURIComponent(view)}` : "";
-  try {
-    const result = await apiGet<{ url: string; filename: string }>(
-      `/api/admin/invoices/${encodeURIComponent(invoiceId)}/pdf${qs}`,
-    );
-    if (tab) {
-      tab.location.href = result.url;
-    } else {
-      window.open(result.url, "_blank", "noopener,noreferrer");
-    }
   } catch (err) {
     tab?.close();
     throw err;

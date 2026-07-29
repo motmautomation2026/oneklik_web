@@ -5,7 +5,6 @@ import {
   fetchUserDetail,
   fetchUserLedger,
   openAdminInvoiceHtml,
-  openAdminInvoicePdf,
   reviewFlaggedAccount,
 } from "../api/adminApi";
 import {
@@ -55,12 +54,14 @@ export default function AdminUserDetailPage() {
     }
   }
 
-  async function handleInvoiceView(invoice: AdminInvoiceRow, kind: "html" | "pdf") {
+  async function handleInvoiceView(
+    invoice: AdminInvoiceRow,
+    view?: "invoice" | "receipt" | "proforma",
+  ) {
     setInvoiceBusyId(invoice.id);
     setInvoiceError(null);
     try {
-      if (kind === "html") await openAdminInvoiceHtml(invoice.id);
-      else await openAdminInvoicePdf(invoice.id);
+      await openAdminInvoiceHtml(invoice.id, view);
     } catch (err) {
       setInvoiceError(err instanceof Error ? err.message : "Could not open invoice");
     } finally {
@@ -97,6 +98,11 @@ export default function AdminUserDetailPage() {
       render: (row: PaymentRow) => row.pack_id ?? "—",
     },
     { key: "gateway", header: "Gateway", render: (row: PaymentRow) => row.gateway },
+    {
+      key: "document",
+      header: "Document",
+      render: (row: PaymentRow) => row.invoice_number ?? "—",
+    },
     { key: "created_at", header: "Created", render: (row: PaymentRow) => formatDateTime(row.created_at) },
   ];
 
@@ -123,7 +129,12 @@ export default function AdminUserDetailPage() {
       header: "Type",
       render: (row: AdminInvoiceRow) => INVOICE_DOC_TYPE_LABEL[row.document_type] ?? row.document_type,
     },
-    { key: "number", header: "Number", render: (row: AdminInvoiceRow) => row.invoice_number },
+    { key: "number", header: "Invoice #", render: (row: AdminInvoiceRow) => row.invoice_number },
+    {
+      key: "receipt",
+      header: "Receipt #",
+      render: (row: AdminInvoiceRow) => row.receipt_number ?? "—",
+    },
     {
       key: "status",
       header: "Status",
@@ -145,26 +156,50 @@ export default function AdminUserDetailPage() {
     {
       key: "actions",
       header: "",
-      render: (row: AdminInvoiceRow) => (
-        <div className="d-flex gap-2 justify-content-end">
-          <Button
-            size="sm"
-            variant="outline-secondary"
-            disabled={invoiceBusyId === row.id}
-            onClick={() => handleInvoiceView(row, "html")}
-          >
-            HTML
-          </Button>
-          <Button
-            size="sm"
-            variant="outline-secondary"
-            disabled={invoiceBusyId === row.id}
-            onClick={() => handleInvoiceView(row, "pdf")}
-          >
-            PDF
-          </Button>
-        </div>
-      ),
+      render: (row: AdminInvoiceRow) => {
+        const busy = invoiceBusyId === row.id;
+        const isTax = row.document_type === "tax_invoice";
+        const isProforma = row.document_type === "proforma_invoice";
+        return (
+          <div className="d-flex gap-1 justify-content-end flex-wrap">
+            {isTax && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  disabled={busy}
+                  onClick={() => handleInvoiceView(row, "invoice")}
+                >
+                  Invoice
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline-secondary"
+                  disabled={busy}
+                  onClick={() => handleInvoiceView(row, "receipt")}
+                >
+                  Receipt
+                </Button>
+              </>
+            )}
+            {isProforma && (
+              <Button
+                size="sm"
+                variant="outline-secondary"
+                disabled={busy}
+                onClick={() => handleInvoiceView(row, "proforma")}
+              >
+                Pro forma
+              </Button>
+            )}
+            {!isTax && !isProforma && (
+              <Button size="sm" variant="outline-secondary" disabled={busy} onClick={() => handleInvoiceView(row)}>
+                View
+              </Button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 

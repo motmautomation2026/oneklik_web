@@ -124,6 +124,9 @@ export interface PaymentRow {
   updated_at: string;
   billing_intent: string | null;
   pack_id: string | null;
+  invoice_id: string | null;
+  invoice_number: string | null;
+  receipt_number: string | null;
 }
 
 export interface PaginatedTransactions {
@@ -265,6 +268,58 @@ export interface AdminInvoiceRow {
   due_date: string | null;
   series: string;
   receipt_number: string | null;
+}
+
+export interface AdminInvoiceListRow {
+  id: string;
+  user_id: string;
+  email: string | null;
+  invoice_number: string;
+  receipt_number: string | null;
+  document_type: InvoiceDocumentType;
+  status: InvoiceStatus;
+  taxable_value_minor: number;
+  cgst_minor: number;
+  sgst_minor: number;
+  igst_minor: number;
+  total_minor: number;
+  currency: string;
+  issued_at: string;
+  due_date: string | null;
+  series: string;
+  financial_year: string;
+  buyer_legal_name: string | null;
+  buyer_gstin: string | null;
+  payment_id: string | null;
+  pack_id: string | null;
+  plan_name: string | null;
+  billing_intent: string | null;
+  gateway_capture_id: string | null;
+}
+
+export interface PaginatedInvoices {
+  rows: AdminInvoiceListRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface InvoicesKpis {
+  tax_invoice_count_mtd: number;
+  tax_invoice_count_all: number;
+  taxable_minor_mtd: number;
+  gst_minor_mtd: number;
+  total_minor_mtd: number;
+  cgst_minor_mtd: number;
+  sgst_minor_mtd: number;
+  igst_minor_mtd: number;
+  taxable_minor_all: number;
+  gst_minor_all: number;
+  total_minor_all: number;
+  open_proforma_count: number;
+  open_proforma_total_minor: number;
+  success_without_invoice_count: number;
+  currency: "INR";
 }
 
 export interface AdminSubscriptionRow {

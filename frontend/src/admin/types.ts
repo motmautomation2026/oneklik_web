@@ -176,7 +176,14 @@ export interface UseCaseBreakdownEntry {
   count: number;
 }
 
-export type LedgerType = "hold" | "deduct" | "release" | "purchase" | "promo_grant" | "admin_adjustment";
+export type LedgerType =
+  | "hold"
+  | "deduct"
+  | "release"
+  | "purchase"
+  | "promo_grant"
+  | "admin_adjustment"
+  | "expiry";
 
 export interface LedgerEntry {
   id: number;
@@ -187,6 +194,13 @@ export interface LedgerEntry {
   reason_code: string | null;
   balance_after: number;
   created_at: string;
+}
+
+export interface GrantUserCreditsResponse {
+  ok: true;
+  available_balance: number;
+  reference_id: string;
+  amount: number;
 }
 
 export interface PaginatedLedger {

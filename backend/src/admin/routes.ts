@@ -24,9 +24,13 @@ import {
   getUserLedger,
   getUsers,
   getUsersKpis,
+  grantUserCredits,
+  MAX_ADMIN_CREDIT_GRANT,
+  MIN_ADMIN_CREDIT_GRANT_REASON_LENGTH,
   reviewFlaggedAccount,
   setUserAccountStatus,
 } from "./queries.js";
+import { randomUUID } from "node:crypto";
 import {
   getAdminInvoiceById,
   getSubscriptions,
@@ -512,6 +516,82 @@ router.get("/users/:id/ledger", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "admin: failed to load user ledger");
     return res.status(500).json({ error: "Could not load user ledger" });
+  }
+});
+
+// Grant-only credit compensation (admin_adjustment ledger row). Debits, plan
+// changes, and money refunds are intentionally out of scope.
+router.post("/users/:id/credits", async (req: Request, res: Response) => {
+  const targetId = req.params.id;
+  const actorId = req.user!.id;
+  const body = (req.body ?? {}) as { amount?: unknown; reason?: unknown; reason_code?: unknown };
+
+  const amountRaw = body.amount;
+  const amount =
+    typeof amountRaw === "number"
+      ? amountRaw
+      : typeof amountRaw === "string" && amountRaw.trim() !== ""
+        ? Number(amountRaw)
+        : NaN;
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return res.status(400).json({ error: "amount must be a positive integer" });
+  }
+  if (amount > MAX_ADMIN_CREDIT_GRANT) {
+    return res.status(400).json({
+      error: `amount cannot exceed ${MAX_ADMIN_CREDIT_GRANT.toLocaleString("en-IN")} credits per grant`,
+    });
+  }
+
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (reason.length < MIN_ADMIN_CREDIT_GRANT_REASON_LENGTH) {
+    return res.status(400).json({
+      error: `A reason of at least ${MIN_ADMIN_CREDIT_GRANT_REASON_LENGTH} characters is required`,
+    });
+  }
+
+  const reasonCodeRaw = typeof body.reason_code === "string" ? body.reason_code.trim() : "";
+  const reasonCode = reasonCodeRaw || "admin_grant";
+  if (reasonCode.length > 64) {
+    return res.status(400).json({ error: "reason_code is too long" });
+  }
+
+  const referenceId = randomUUID();
+
+  try {
+    const result = await grantUserCredits({
+      userId: targetId,
+      amount,
+      reason,
+      reasonCode,
+      actedBy: actorId,
+      referenceId,
+    });
+
+    if (!result.ok) {
+      if (result.reason === "not_found") return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ error: "Wallet not found for user" });
+    }
+
+    req.log.info(
+      {
+        userId: targetId,
+        amount: result.amount,
+        actedBy: actorId,
+        referenceId: result.reference_id,
+        availableBalance: result.available_balance,
+      },
+      "admin: credit grant applied",
+    );
+
+    return res.json({
+      ok: true,
+      available_balance: result.available_balance,
+      reference_id: result.reference_id,
+      amount: result.amount,
+    });
+  } catch (err) {
+    req.log.error({ err, userId: targetId, amount, referenceId }, "admin: failed to grant credits");
+    return res.status(500).json({ error: "Could not grant credits" });
   }
 });
 

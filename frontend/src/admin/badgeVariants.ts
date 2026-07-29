@@ -47,6 +47,7 @@ export const LEDGER_TYPE_VARIANT: Record<string, string> = {
   hold: "warning",
   release: "info",
   admin_adjustment: "primary",
+  expiry: "secondary",
 };
 
 export const SUBSCRIPTION_STATUS_VARIANT: Record<string, string> = {

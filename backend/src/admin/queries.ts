@@ -1009,6 +1009,81 @@ export async function setUserAccountStatus(params: {
   return { ok: true, previous_status: previousStatus, new_status: newStatus };
 }
 
+// Hard ceiling per grant call. Monthly packs are 4k–20k; 50k leaves headroom
+// for multi-pack goodwill without letting a typo grant millions.
+export const MAX_ADMIN_CREDIT_GRANT = 50_000;
+export const MIN_ADMIN_CREDIT_GRANT_REASON_LENGTH = 5;
+
+export type GrantUserCreditsResult =
+  | { ok: false; reason: "not_found" | "wallet_not_found" }
+  | { ok: true; available_balance: number; reference_id: string; amount: number };
+
+// Grant-only credit compensation. Wallet mutation goes through
+// fn_admin_adjust_credits (admin_adjustment ledger row). Audit free-text +
+// acted_by live in admin_credit_adjustments. Does not touch lifetime_purchased,
+// held_balance, or subscriptions.
+export async function grantUserCredits(params: {
+  userId: string;
+  amount: number;
+  reason: string;
+  reasonCode: string;
+  actedBy: string;
+  referenceId: string;
+}): Promise<GrantUserCreditsResult> {
+  const { userId, amount, reason, reasonCode, actedBy, referenceId } = params;
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (!profile) return { ok: false, reason: "not_found" };
+
+  const { data: wallet, error: walletError } = await supabaseAdmin
+    .from("credit_wallets")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (walletError) throw walletError;
+  if (!wallet) return { ok: false, reason: "wallet_not_found" };
+
+  const { data: balanceAfter, error: rpcError } = await supabaseAdmin.rpc("fn_admin_adjust_credits", {
+    p_user_id: userId,
+    p_amount: amount,
+    p_reference_id: referenceId,
+    p_reason_code: reasonCode,
+  });
+  if (rpcError) throw rpcError;
+
+  const availableBalance = typeof balanceAfter === "number" ? balanceAfter : Number(balanceAfter);
+  if (!Number.isFinite(availableBalance)) {
+    throw new Error("fn_admin_adjust_credits returned a non-numeric balance");
+  }
+
+  const { error: auditError } = await supabaseAdmin.from("admin_credit_adjustments").insert({
+    user_id: userId,
+    amount,
+    reason,
+    reason_code: reasonCode,
+    reference_id: referenceId,
+    balance_after: availableBalance,
+    acted_by: actedBy,
+  });
+  if (auditError) {
+    // Unique violation on reference_id means a retry after the RPC succeeded —
+    // treat as success rather than failing the grant the user already received.
+    if (auditError.code !== "23505") throw auditError;
+  }
+
+  return {
+    ok: true,
+    available_balance: availableBalance,
+    reference_id: referenceId,
+    amount,
+  };
+}
+
 // ── v4: runs monitor, lists browser, company rollup, admins ──
 
 const RUN_SELECT =

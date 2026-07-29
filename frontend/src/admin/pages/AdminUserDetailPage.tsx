@@ -18,6 +18,7 @@ import {
   SUBSCRIPTION_STATUS_VARIANT,
 } from "../badgeVariants";
 import DataTable from "../components/DataTable";
+import CreditGrantPanel from "../components/CreditGrantPanel";
 import KpiTile from "../components/KpiTile";
 import ModerationPanel from "../components/ModerationPanel";
 import PaginationBar from "../components/PaginationBar";
@@ -287,6 +288,15 @@ export default function AdminUserDetailPage() {
           <KpiTile label="Lifetime consumed" value={formatNumber(user.lifetime_consumed)} />
         </div>
       </div>
+
+      <CreditGrantPanel
+        userId={user.user_id}
+        availableBalance={user.available_balance}
+        onChanged={() => {
+          setLedgerPage(1);
+          setRefetchKey((k) => k + 1);
+        }}
+      />
 
       <div className="row g-3 mb-4">
         <div className="col-12 col-xl-6">

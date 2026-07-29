@@ -12,6 +12,7 @@ import type {
   CompanyRollupEntry,
   FeatureUsageResponse,
   FunnelStats,
+  GrantUserCreditsResponse,
   ListsActivity,
   PaginatedLedger,
   PaginatedLists,
@@ -109,6 +110,19 @@ export function fetchUserLedger(
 ): Promise<PaginatedLedger> {
   const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
   return apiGet<PaginatedLedger>(`/api/admin/users/${encodeURIComponent(userId)}/ledger?${query.toString()}`);
+}
+
+export interface GrantUserCreditsParams {
+  amount: number;
+  reason: string;
+  reason_code?: string;
+}
+
+export function grantUserCredits(
+  userId: string,
+  params: GrantUserCreditsParams,
+): Promise<GrantUserCreditsResponse> {
+  return apiPost<GrantUserCreditsResponse>(`/api/admin/users/${encodeURIComponent(userId)}/credits`, params);
 }
 
 export function reviewFlaggedAccount(

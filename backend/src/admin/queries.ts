@@ -67,9 +67,11 @@ async function sumColumnPaged(
   return total;
 }
 
+// payments → fn_admin_distinct_paid_users (hardcoded status = 'success').
+// enrichment_runs → fn_admin_distinct_run_users (optional since filter).
 async function distinctUserCount(
   table: "enrichment_runs" | "payments",
-  filters: { statusEq?: string; sinceIso?: string },
+  filters: { sinceIso?: string } = {},
 ): Promise<number> {
   if (table === "payments") {
     const { data, error } = await supabaseAdmin.rpc("fn_admin_distinct_paid_users");
@@ -259,8 +261,8 @@ export async function getFunnel(): Promise<FunnelStats> {
     totalSignups(),
     headCount("profiles", (q) => q),
     headCount("profiles", (q) => q.not("company", "is", null)),
-    distinctUserCount("enrichment_runs", {}),
-    distinctUserCount("payments", { statusEq: "success" }),
+    distinctUserCount("enrichment_runs"),
+    distinctUserCount("payments"),
   ]);
 
   return { signed_up: signedUp, verified, onboarded, first_search: firstSearch, paid };

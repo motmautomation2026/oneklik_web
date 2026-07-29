@@ -11,7 +11,8 @@ import {
   setSupportMute,
 } from "../api/adminApi";
 import SectionCard from "../components/SectionCard";
-import { ACCOUNT_STATUS_VARIANT, TICKET_PRIORITY_VARIANT, TICKET_STATUS_VARIANT } from "../badgeVariants";
+import { ACCOUNT_STATUS_VARIANT, SUBSCRIPTION_STATUS_VARIANT, TICKET_PRIORITY_VARIANT, TICKET_STATUS_VARIANT } from "../badgeVariants";
+
 import { formatDateTime, formatNumber } from "../format";
 import { useAdminResource } from "../hooks/useAdminResource";
 import { ADMIN_CHART_COLORS } from "../theme";
@@ -324,6 +325,31 @@ export default function AdminSupportDetailPage() {
                   </div>
                 )}
                 <div className="mb-2">Balance: {formatNumber(ticket.requester.available_balance)} credits</div>
+                {ticket.requester.subscription ? (
+                  <div className="mb-2">
+                    <div className="d-flex align-items-center gap-2 flex-wrap mb-1">
+                      <Badge bg="primary">
+                        {ticket.requester.subscription.plan_name ?? ticket.requester.subscription.plan_id}
+                      </Badge>
+                      <Badge
+                        bg={
+                          SUBSCRIPTION_STATUS_VARIANT[ticket.requester.subscription.status] ?? "secondary"
+                        }
+                      >
+                        {ticket.requester.subscription.status}
+                      </Badge>
+                    </div>
+                    <div style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+                      Period ends {formatDateTime(ticket.requester.subscription.current_period_end)}
+                      <br />
+                      Buffer until {formatDateTime(ticket.requester.subscription.grace_ends_at)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                    No subscription
+                  </div>
+                )}
                 <div className="mb-2">Other tickets: {formatNumber(ticket.requester.other_ticket_count)}</div>
 
                 {ticket.requester.account_status !== "active" && (

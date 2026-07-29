@@ -6,7 +6,7 @@ import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
 import PaginationBar from "../components/PaginationBar";
 import SectionCard from "../components/SectionCard";
-import { ACCOUNT_STATUS_VARIANT } from "../badgeVariants";
+import { ACCOUNT_STATUS_VARIANT, SUBSCRIPTION_STATUS_VARIANT } from "../badgeVariants";
 import { formatDateTime, formatInrFromMinorUnits, formatNumber } from "../format";
 import { useAdminResource } from "../hooks/useAdminResource";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
@@ -113,6 +113,23 @@ export default function AdminUsersPage() {
       render: (row: AdminUserRow) => (
         <Badge bg={ACCOUNT_STATUS_VARIANT[row.account_status] ?? "secondary"}>{row.account_status}</Badge>
       ),
+    },
+    {
+      key: "plan",
+      header: "Plan",
+      render: (row: AdminUserRow) => row.plan_id ?? "—",
+    },
+    {
+      key: "subscription_status",
+      header: "Sub status",
+      render: (row: AdminUserRow) =>
+        row.subscription_status ? (
+          <Badge bg={SUBSCRIPTION_STATUS_VARIANT[row.subscription_status] ?? "secondary"}>
+            {row.subscription_status}
+          </Badge>
+        ) : (
+          "—"
+        ),
     },
     {
       key: "onboarded",

@@ -1,4 +1,4 @@
-import { apiDownload, apiGet, apiPatch, apiPost } from "../../lib/api";
+import { apiDownload, apiGet, apiGetText, apiPatch, apiPost } from "../../lib/api";
 import type {
   AccountStatus,
   AdminAccountRow,
@@ -16,6 +16,7 @@ import type {
   PaginatedLedger,
   PaginatedLists,
   PaginatedRuns,
+  PaginatedSubscriptions,
   PaginatedTransactions,
   PaginatedUsers,
   ModerationAction,
@@ -23,6 +24,8 @@ import type {
   RunStatus,
   RunsKpis,
   SetUserStatusResponse,
+  SubscriptionStatus,
+  SubscriptionsKpis,
   SystemHealthResponse,
   TransactionsKpis,
   TrendsResponse,
@@ -188,6 +191,76 @@ export function fetchTopCompanies(limit = 10): Promise<{ companies: CompanyRollu
 
 export function fetchAdmins(): Promise<{ admins: AdminAccountRow[] }> {
   return apiGet<{ admins: AdminAccountRow[] }>("/api/admin/admins");
+}
+
+export function fetchSubscriptionsKpis(signal?: AbortSignal): Promise<SubscriptionsKpis> {
+  return apiGet<SubscriptionsKpis>("/api/admin/subscriptions/kpis", signal);
+}
+
+export interface FetchSubscriptionsParams {
+  page: number;
+  pageSize: number;
+  status?: SubscriptionStatus;
+  planId?: string;
+  search?: string;
+  lapsingSoon?: boolean;
+  signal?: AbortSignal;
+}
+
+export function fetchSubscriptions({
+  page,
+  pageSize,
+  status,
+  planId,
+  search,
+  lapsingSoon,
+  signal,
+}: FetchSubscriptionsParams): Promise<PaginatedSubscriptions> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (status) params.set("status", status);
+  if (planId) params.set("planId", planId);
+  if (search) params.set("search", search);
+  if (lapsingSoon) params.set("lapsingSoon", "1");
+  return apiGet<PaginatedSubscriptions>(`/api/admin/subscriptions?${params.toString()}`, signal);
+}
+
+export async function openAdminInvoiceHtml(invoiceId: string, view?: string): Promise<void> {
+  // Open synchronously on the click stack so popup blockers don't swallow the tab
+  // after the await. Failures navigate the placeholder tab to about:blank and throw.
+  const tab = window.open("about:blank", "_blank");
+  const qs = view ? `?view=${encodeURIComponent(view)}` : "";
+  try {
+    const html = await apiGetText(`/api/admin/invoices/${encodeURIComponent(invoiceId)}/html${qs}`);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    if (tab) {
+      tab.location.href = url;
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
+}
+
+export async function openAdminInvoicePdf(invoiceId: string, view?: string): Promise<void> {
+  const tab = window.open("about:blank", "_blank");
+  const qs = view ? `?view=${encodeURIComponent(view)}` : "";
+  try {
+    const result = await apiGet<{ url: string; filename: string }>(
+      `/api/admin/invoices/${encodeURIComponent(invoiceId)}/pdf${qs}`,
+    );
+    if (tab) {
+      tab.location.href = result.url;
+    } else {
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    }
+  } catch (err) {
+    tab?.close();
+    throw err;
+  }
 }
 
 // ── support tickets ─────────────────────────────────────────────────────

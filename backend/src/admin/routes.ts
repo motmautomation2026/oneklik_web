@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { requireAdmin } from "./middleware.js";
+import { supabaseAdmin } from "../lib/supabaseAdmin.js";
 import {
   getAdmins,
   getAllTransactionsForExport,
@@ -27,6 +28,16 @@ import {
   setUserAccountStatus,
 } from "./queries.js";
 import {
+  getAdminInvoiceById,
+  getSubscriptions,
+  getSubscriptionsKpis,
+} from "./billingQueries.js";
+import {
+  ensureInvoicePdf,
+  renderInvoiceDocument,
+  resolveDocumentView,
+} from "../lib/issueInvoice.js";
+import {
   addAdminMessage,
   ExportTooLargeError,
   MAX_EXPORT_ROWS,
@@ -50,7 +61,15 @@ import {
   type TicketPriority,
   type TicketStatus,
 } from "../support/types.js";
-import type { AccountStatus, FlaggedStatus, ModerationAction, PaymentRow, PaymentStatus, RunStatus } from "./types.js";
+import type {
+  AccountStatus,
+  FlaggedStatus,
+  ModerationAction,
+  PaymentRow,
+  PaymentStatus,
+  RunStatus,
+  SubscriptionStatus,
+} from "./types.js";
 
 const router = Router();
 
@@ -225,6 +244,8 @@ router.get("/users/export", async (req: Request, res: Response) => {
         { header: "Lifetime purchased", value: (r) => r.lifetime_purchased },
         { header: "Lifetime consumed", value: (r) => r.lifetime_consumed },
         { header: "Flagged", value: (r) => (r.is_flagged ? "Yes" : "No") },
+        { header: "Plan", value: (r) => r.plan_id ?? "" },
+        { header: "Subscription status", value: (r) => r.subscription_status ?? "" },
       ],
       rows,
     );
@@ -307,6 +328,155 @@ router.get("/companies/top", async (req: Request, res: Response) => {
   } catch (err) {
     req.log.error({ err }, "admin: failed to load top companies");
     return res.status(500).json({ error: "Could not load top companies" });
+  }
+});
+
+const SUBSCRIPTION_STATUSES: SubscriptionStatus[] = ["active", "past_due", "expired", "cancelled"];
+
+function subscriptionStatusParam(value: unknown): SubscriptionStatus | undefined {
+  return typeof value === "string" && (SUBSCRIPTION_STATUSES as string[]).includes(value)
+    ? (value as SubscriptionStatus)
+    : undefined;
+}
+
+function planIdParam(value: unknown): string | undefined {
+  const v = stringParam(value);
+  if (!v) return undefined;
+  if (!["starter", "growth", "business"].includes(v)) return undefined;
+  return v;
+}
+
+// Literal /subscriptions/kpis before any future /subscriptions/:id.
+router.get("/subscriptions/kpis", async (req: Request, res: Response) => {
+  try {
+    const kpis = await getSubscriptionsKpis();
+    return res.json(kpis);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load subscription KPIs");
+    return res.status(500).json({ error: "Could not load subscription KPIs" });
+  }
+});
+
+router.get("/subscriptions", async (req: Request, res: Response) => {
+  const page = clampInt(req.query.page, 1, 1, 100_000);
+  const pageSize = clampInt(req.query.pageSize, 25, 1, 100);
+  const status = subscriptionStatusParam(req.query.status);
+  const planId = planIdParam(req.query.planId);
+  const search = stringParam(req.query.search);
+  const lapsingSoon = req.query.lapsingSoon === "1" || req.query.lapsingSoon === "true";
+  try {
+    const result = await getSubscriptions({ page, pageSize, status, planId, search, lapsingSoon });
+    return res.json(result);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load subscriptions");
+    return res.status(500).json({ error: "Could not load subscriptions" });
+  }
+});
+
+router.get("/invoices/:id", async (req: Request, res: Response) => {
+  try {
+    const invoice = await getAdminInvoiceById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+    return res.json({
+      invoice: {
+        id: invoice.id,
+        invoice_number: invoice.invoice_number,
+        document_type: invoice.document_type,
+        status: invoice.status,
+        total_minor: invoice.total_minor,
+        currency: invoice.currency,
+        issued_at: invoice.issued_at,
+        due_date: invoice.due_date ?? null,
+        series: invoice.series,
+        receipt_number: invoice.receipt_number ?? null,
+        user_id: invoice.user_id,
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to load invoice");
+    return res.status(500).json({ error: "Could not load invoice" });
+  }
+});
+
+router.get("/invoices/:id/html", async (req: Request, res: Response) => {
+  try {
+    const invoice = await getAdminInvoiceById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+
+    let buyerEmail: string | null = null;
+    if (invoice.user_id) {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(invoice.user_id as string);
+      buyerEmail = data.user?.email ?? null;
+    }
+
+    const view = resolveDocumentView(invoice, typeof req.query.view === "string" ? req.query.view : null);
+    const html = renderInvoiceDocument(invoice, buyerEmail, view);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.send(html);
+  } catch (err) {
+    req.log.error({ err }, "admin: failed to render invoice HTML");
+    return res.status(500).json({ error: "Could not render invoice" });
+  }
+});
+
+router.get("/invoices/:id/pdf", async (req: Request, res: Response) => {
+  try {
+    const invoice = await getAdminInvoiceById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+
+    const view = resolveDocumentView(invoice, typeof req.query.view === "string" ? req.query.view : null);
+
+    // Prefer the cached PDF when it matches the primary view for this document —
+    // avoids regenerating + rewriting storage/DB on every admin click.
+    const cachedPath = invoice.pdf_storage_path;
+    const canReuseCache =
+      Boolean(cachedPath) &&
+      ((view === "receipt" && invoice.document_type === "tax_invoice") ||
+        (view === "proforma" && invoice.document_type === "proforma_invoice"));
+
+    let path: string;
+    let filename: string;
+    if (canReuseCache && cachedPath) {
+      path = cachedPath;
+      filename = cachedPath.split("/").pop() ?? `${invoice.invoice_number}.pdf`;
+    } else {
+      ({ path, filename } = await ensureInvoicePdf(invoice, view));
+    }
+
+    const { data: signed, error: signError } = await supabaseAdmin.storage.from("invoices").createSignedUrl(path, 60);
+
+    if (signError || !signed?.signedUrl) {
+      // Cached path may be stale — fall through to regenerate once.
+      if (canReuseCache) {
+        ({ path, filename } = await ensureInvoicePdf(invoice, view));
+        const retry = await supabaseAdmin.storage.from("invoices").createSignedUrl(path, 60);
+        if (retry.error || !retry.data?.signedUrl) {
+          req.log.error({ err: retry.error ?? signError }, "admin: failed to sign invoice PDF URL");
+          return res.status(500).json({ error: "Could not prepare PDF download" });
+        }
+        return res.json({
+          url: retry.data.signedUrl,
+          filename,
+          view,
+          expires_in: 60,
+        });
+      }
+      req.log.error({ err: signError }, "admin: failed to sign invoice PDF URL");
+      return res.status(500).json({ error: "Could not prepare PDF download" });
+    }
+
+    return res.json({
+      url: signed.signedUrl,
+      filename,
+      view,
+      expires_in: 60,
+    });
+  } catch (err) {
+    req.log.error({ err }, "admin: invoice PDF generation failed");
+    return res.status(503).json({
+      error: "PDF generation is temporarily unavailable. You can still view the invoice HTML.",
+    });
   }
 });
 

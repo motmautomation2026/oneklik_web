@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { fetchUserBillingBundle, getSubscriptionHintsByUserIds } from "./billingQueries.js";
 import type {
   AccountStatus,
   AdminAccountRow,
@@ -26,6 +27,7 @@ import type {
   RunRow,
   RunStatus,
   RunsKpis,
+  SubscriptionStatus,
   SystemHealth,
   TransactionsKpis,
   TrendPoint,
@@ -395,7 +397,11 @@ const PROFILE_WITH_WALLET_SELECT =
 
 // Shared by getUsers and getAllUsersForExport (the export path scans every
 // matching page instead of one) so both build the exact same row shape.
-function toAdminUserRow(row: ProfileWithWallet & { email: string | null }, flaggedSet: Set<string>): AdminUserRow {
+function toAdminUserRow(
+  row: ProfileWithWallet & { email: string | null },
+  flaggedSet: Set<string>,
+  subHint?: { plan_id: string; status: SubscriptionStatus } | null,
+): AdminUserRow {
   return {
     user_id: row.id,
     email: row.email,
@@ -409,6 +415,8 @@ function toAdminUserRow(row: ProfileWithWallet & { email: string | null }, flagg
     is_flagged: flaggedSet.has(row.id),
     account_status: row.account_status ?? "active",
     suspended_until: row.suspended_until ?? null,
+    plan_id: subHint?.plan_id ?? null,
+    subscription_status: subHint?.status ?? null,
   };
 }
 
@@ -486,9 +494,14 @@ export async function getUsers({ page, pageSize, search, status }: GetUsersParam
   }
 
   const userIds = profileRows.map((r) => r.id);
-  const flaggedSet = await getOpenFlaggedSetFor(userIds);
+  const [flaggedSet, subHints] = await Promise.all([
+    getOpenFlaggedSetFor(userIds),
+    getSubscriptionHintsByUserIds(userIds),
+  ]);
   const withEmails = await attachEmails(profileRows.map((r) => ({ ...r, user_id: r.id })));
-  const rows: AdminUserRow[] = withEmails.map((row) => toAdminUserRow(row, flaggedSet));
+  const rows: AdminUserRow[] = withEmails.map((row) =>
+    toAdminUserRow(row, flaggedSet, subHints.get(row.id) ?? null),
+  );
 
   return { rows, total, page, page_size: pageSize };
 }
@@ -520,9 +533,13 @@ export async function getAllUsersForExport(search?: string): Promise<AdminUserRo
     (row) => profileRows.push(row),
   );
 
-  const flaggedSet = await getOpenFlaggedSetFor(profileRows.map((r) => r.id));
+  const userIds = profileRows.map((r) => r.id);
+  const [flaggedSet, subHints] = await Promise.all([
+    getOpenFlaggedSetFor(userIds),
+    getSubscriptionHintsByUserIds(userIds),
+  ]);
   const withEmails = await attachEmails(profileRows.map((r) => ({ ...r, user_id: r.id })));
-  return withEmails.map((row) => toAdminUserRow(row, flaggedSet));
+  return withEmails.map((row) => toAdminUserRow(row, flaggedSet, subHints.get(row.id) ?? null));
 }
 
 interface RawPaymentRow {
@@ -536,10 +553,12 @@ interface RawPaymentRow {
   currency: string;
   created_at: string;
   updated_at: string;
+  billing_intent: string | null;
+  pack_id: string | null;
 }
 
 const PAYMENT_SELECT =
-  "id, user_id, status, gateway, gateway_payment_id, credits_promised, amount_minor_units, currency, created_at, updated_at";
+  "id, user_id, status, gateway, gateway_payment_id, credits_promised, amount_minor_units, currency, created_at, updated_at, billing_intent, pack_id";
 
 interface GetTransactionsParams {
   page: number;
@@ -767,7 +786,7 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
 
   const typedProfile = profile as unknown as ProfileDetailRow;
 
-  const [flagResult, moderationResult, listResult, listsTotal, paymentResult, paymentsTotal, emailResult] =
+  const [flagResult, moderationResult, listResult, listsTotal, paymentResult, paymentsTotal, emailResult, billing] =
     await Promise.all([
       supabaseAdmin
         .from("flagged_accounts")
@@ -794,6 +813,7 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
         .limit(20),
       headCount("payments", (q) => q.eq("user_id", userId)),
       supabaseAdmin.auth.admin.getUserById(userId),
+      fetchUserBillingBundle(userId),
     ]);
 
   if (flagResult.error) throw flagResult.error;
@@ -818,6 +838,8 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     is_flagged: flags.some((f) => f.status === "open"),
     account_status: typedProfile.account_status ?? "active",
     suspended_until: typedProfile.suspended_until ?? null,
+    plan_id: billing.subscription?.plan_id ?? null,
+    subscription_status: billing.subscription?.status ?? null,
   };
 
   const moderationActions = await resolveActorEmails(
@@ -826,7 +848,12 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
 
   // All rows here belong to the one user already looked up above — no need
   // to pay for attachEmails' per-row getUserById lookups.
-  const payments: PaymentRow[] = ((paymentResult.data ?? []) as RawPaymentRow[]).map((p) => ({ ...p, email }));
+  const payments: PaymentRow[] = ((paymentResult.data ?? []) as RawPaymentRow[]).map((p) => ({
+    ...p,
+    email,
+    billing_intent: p.billing_intent ?? null,
+    pack_id: p.pack_id ?? null,
+  }));
 
   return {
     user,
@@ -839,6 +866,9 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     lists_total: listsTotal,
     payments,
     payments_total: paymentsTotal,
+    subscription: billing.subscription,
+    billing_profile: billing.billing_profile,
+    invoices: billing.invoices,
   };
 }
 

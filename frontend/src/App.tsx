@@ -30,6 +30,7 @@ import AdminOverviewPage from "./admin/pages/AdminOverviewPage";
 import AdminUsersPage from "./admin/pages/AdminUsersPage";
 import AdminUserDetailPage from "./admin/pages/AdminUserDetailPage";
 import AdminTransactionsPage from "./admin/pages/AdminTransactionsPage";
+import AdminSubscriptionsPage from "./admin/pages/AdminSubscriptionsPage";
 import AdminRunsPage from "./admin/pages/AdminRunsPage";
 import AdminListsPage from "./admin/pages/AdminListsPage";
 import AdminSupportPage from "./admin/pages/AdminSupportPage";
@@ -207,6 +208,7 @@ function App() {
             <Route path="users" element={<AdminUsersPage />} />
             <Route path="users/:id" element={<AdminUserDetailPage />} />
             <Route path="transactions" element={<AdminTransactionsPage />} />
+            <Route path="subscriptions" element={<AdminSubscriptionsPage />} />
             <Route path="runs" element={<AdminRunsPage />} />
             <Route path="support" element={<AdminSupportPage />} />
             <Route path="support/:id" element={<AdminSupportDetailPage />} />

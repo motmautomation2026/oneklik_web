@@ -1,8 +1,22 @@
 import { useState } from "react";
 import { Alert, Badge, Button, Spinner } from "react-bootstrap";
 import { Link, useParams } from "react-router-dom";
-import { fetchUserDetail, fetchUserLedger, reviewFlaggedAccount } from "../api/adminApi";
-import { ACCOUNT_STATUS_VARIANT, FLAGGED_STATUS_VARIANT, LEDGER_TYPE_VARIANT, PAYMENT_STATUS_VARIANT } from "../badgeVariants";
+import {
+  fetchUserDetail,
+  fetchUserLedger,
+  openAdminInvoiceHtml,
+  openAdminInvoicePdf,
+  reviewFlaggedAccount,
+} from "../api/adminApi";
+import {
+  ACCOUNT_STATUS_VARIANT,
+  FLAGGED_STATUS_VARIANT,
+  INVOICE_DOC_TYPE_LABEL,
+  INVOICE_STATUS_VARIANT,
+  LEDGER_TYPE_VARIANT,
+  PAYMENT_STATUS_VARIANT,
+  SUBSCRIPTION_STATUS_VARIANT,
+} from "../badgeVariants";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
 import ModerationPanel from "../components/ModerationPanel";
@@ -11,7 +25,7 @@ import SectionCard from "../components/SectionCard";
 import { formatDateTime, formatInrFromMinorUnits, formatNumber } from "../format";
 import { useAdminResource } from "../hooks/useAdminResource";
 import { ADMIN_CHART_COLORS } from "../theme";
-import type { LedgerEntry, PaymentRow } from "../types";
+import type { AdminInvoiceRow, LedgerEntry, PaymentRow } from "../types";
 
 const LEDGER_PAGE_SIZE = 25;
 
@@ -21,6 +35,8 @@ export default function AdminUserDetailPage() {
   const [refetchKey, setRefetchKey] = useState(0);
   const [ledgerPage, setLedgerPage] = useState(1);
   const [reviewingFlagId, setReviewingFlagId] = useState<string | null>(null);
+  const [invoiceBusyId, setInvoiceBusyId] = useState<string | null>(null);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
 
   const detail = useAdminResource(() => fetchUserDetail(userId), [userId, refetchKey]);
   const ledger = useAdminResource(
@@ -35,6 +51,19 @@ export default function AdminUserDetailPage() {
       setRefetchKey((k) => k + 1);
     } finally {
       setReviewingFlagId(null);
+    }
+  }
+
+  async function handleInvoiceView(invoice: AdminInvoiceRow, kind: "html" | "pdf") {
+    setInvoiceBusyId(invoice.id);
+    setInvoiceError(null);
+    try {
+      if (kind === "html") await openAdminInvoiceHtml(invoice.id);
+      else await openAdminInvoicePdf(invoice.id);
+    } catch (err) {
+      setInvoiceError(err instanceof Error ? err.message : "Could not open invoice");
+    } finally {
+      setInvoiceBusyId(null);
     }
   }
 
@@ -56,6 +85,16 @@ export default function AdminUserDetailPage() {
       align: "end" as const,
       render: (row: PaymentRow) => formatNumber(row.credits_promised),
     },
+    {
+      key: "intent",
+      header: "Intent",
+      render: (row: PaymentRow) => row.billing_intent ?? "—",
+    },
+    {
+      key: "pack",
+      header: "Pack",
+      render: (row: PaymentRow) => row.pack_id ?? "—",
+    },
     { key: "gateway", header: "Gateway", render: (row: PaymentRow) => row.gateway },
     { key: "created_at", header: "Created", render: (row: PaymentRow) => formatDateTime(row.created_at) },
   ];
@@ -75,6 +114,57 @@ export default function AdminUserDetailPage() {
     },
     { key: "reason_code", header: "Reason", render: (row: LedgerEntry) => row.reason_code ?? "—" },
     { key: "created_at", header: "When", render: (row: LedgerEntry) => formatDateTime(row.created_at) },
+  ];
+
+  const invoiceColumns = [
+    {
+      key: "type",
+      header: "Type",
+      render: (row: AdminInvoiceRow) => INVOICE_DOC_TYPE_LABEL[row.document_type] ?? row.document_type,
+    },
+    { key: "number", header: "Number", render: (row: AdminInvoiceRow) => row.invoice_number },
+    {
+      key: "status",
+      header: "Status",
+      render: (row: AdminInvoiceRow) => (
+        <Badge bg={INVOICE_STATUS_VARIANT[row.status] ?? "secondary"}>{row.status}</Badge>
+      ),
+    },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "end" as const,
+      render: (row: AdminInvoiceRow) => formatInrFromMinorUnits(row.total_minor),
+    },
+    {
+      key: "issued",
+      header: "Issued",
+      render: (row: AdminInvoiceRow) => formatDateTime(row.issued_at),
+    },
+    {
+      key: "actions",
+      header: "",
+      render: (row: AdminInvoiceRow) => (
+        <div className="d-flex gap-2 justify-content-end">
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            disabled={invoiceBusyId === row.id}
+            onClick={() => handleInvoiceView(row, "html")}
+          >
+            HTML
+          </Button>
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            disabled={invoiceBusyId === row.id}
+            onClick={() => handleInvoiceView(row, "pdf")}
+          >
+            PDF
+          </Button>
+        </div>
+      ),
+    },
   ];
 
   if (detail.loading) {
@@ -98,8 +188,21 @@ export default function AdminUserDetailPage() {
     );
   }
 
-  const { user, role, use_case, status_reason, flags, moderation_actions, lists, lists_total, payments, payments_total } =
-    detail.data;
+  const {
+    user,
+    role,
+    use_case,
+    status_reason,
+    flags,
+    moderation_actions,
+    lists,
+    lists_total,
+    payments,
+    payments_total,
+    subscription,
+    billing_profile,
+    invoices,
+  } = detail.data;
   const openFlags = flags.filter((f) => f.status === "open");
 
   return (
@@ -109,12 +212,20 @@ export default function AdminUserDetailPage() {
       </Link>
 
       <div className="mb-4">
-        <div className="d-flex align-items-center gap-2 mb-1">
+        <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
           <h1 className="h4 mb-0" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
             {user.email ?? user.user_id}
           </h1>
           {user.account_status !== "active" && (
             <Badge bg={ACCOUNT_STATUS_VARIANT[user.account_status] ?? "secondary"}>{user.account_status}</Badge>
+          )}
+          {subscription && (
+            <>
+              <Badge bg="primary">{subscription.plan_name ?? subscription.plan_id}</Badge>
+              <Badge bg={SUBSCRIPTION_STATUS_VARIANT[subscription.status] ?? "secondary"}>
+                {subscription.status}
+              </Badge>
+            </>
           )}
         </div>
         <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
@@ -174,6 +285,104 @@ export default function AdminUserDetailPage() {
         </div>
         <div className="col-6 col-lg-3">
           <KpiTile label="Lifetime consumed" value={formatNumber(user.lifetime_consumed)} />
+        </div>
+      </div>
+
+      <div className="row g-3 mb-4">
+        <div className="col-12 col-xl-6">
+          <SectionCard title="Subscription" loading={false} error={null}>
+            {!subscription ? (
+              <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                No subscription
+              </div>
+            ) : (
+              <dl className="row mb-0 small">
+                <dt className="col-sm-4">Plan</dt>
+                <dd className="col-sm-8">{subscription.plan_name ?? subscription.plan_id}</dd>
+                <dt className="col-sm-4">Status</dt>
+                <dd className="col-sm-8">
+                  <Badge bg={SUBSCRIPTION_STATUS_VARIANT[subscription.status] ?? "secondary"}>
+                    {subscription.status}
+                  </Badge>
+                  {subscription.is_in_buffer && (
+                    <Badge bg="warning" className="ms-2">
+                      in buffer
+                    </Badge>
+                  )}
+                </dd>
+                <dt className="col-sm-4">Monthly credits</dt>
+                <dd className="col-sm-8">
+                  {subscription.credits != null ? formatNumber(subscription.credits) : "—"}
+                </dd>
+                <dt className="col-sm-4">Period</dt>
+                <dd className="col-sm-8">
+                  {formatDateTime(subscription.current_period_start)} →{" "}
+                  {formatDateTime(subscription.current_period_end)}
+                </dd>
+                <dt className="col-sm-4">Buffer until</dt>
+                <dd className="col-sm-8">{formatDateTime(subscription.grace_ends_at)}</dd>
+                <dt className="col-sm-4">Pending plan</dt>
+                <dd className="col-sm-8">{subscription.pending_plan_id ?? "—"}</dd>
+                {subscription.period_change_type && (
+                  <>
+                    <dt className="col-sm-4">Period change</dt>
+                    <dd className="col-sm-8">
+                      {subscription.period_change_type}
+                      {subscription.period_credits_granted != null
+                        ? ` · ${formatNumber(subscription.period_credits_granted)} credits granted`
+                        : ""}
+                    </dd>
+                  </>
+                )}
+              </dl>
+            )}
+          </SectionCard>
+        </div>
+        <div className="col-12 col-xl-6">
+          <SectionCard title="Billing profile" loading={false} error={null}>
+            {!billing_profile ? (
+              <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                No billing profile
+              </div>
+            ) : (
+              <dl className="row mb-0 small">
+                <dt className="col-sm-4">Legal name</dt>
+                <dd className="col-sm-8">{billing_profile.legal_name}</dd>
+                <dt className="col-sm-4">Entity</dt>
+                <dd className="col-sm-8">{billing_profile.entity_type}</dd>
+                <dt className="col-sm-4">GSTIN</dt>
+                <dd className="col-sm-8">{billing_profile.gstin ?? "—"}</dd>
+                <dt className="col-sm-4">Address</dt>
+                <dd className="col-sm-8">
+                  {billing_profile.address_line1}
+                  {billing_profile.address_line2 ? `, ${billing_profile.address_line2}` : ""}
+                  <br />
+                  {billing_profile.city}, {billing_profile.state_name} ({billing_profile.state_code}){" "}
+                  {billing_profile.postal_code}
+                  <br />
+                  {billing_profile.country}
+                </dd>
+              </dl>
+            )}
+          </SectionCard>
+        </div>
+      </div>
+
+      <div className="row g-3 mb-4">
+        <div className="col-12">
+          <SectionCard title={`Invoices (${invoices.length})`} loading={false} error={null}>
+            {invoiceError && (
+              <Alert variant="danger" className="py-2 small" dismissible onClose={() => setInvoiceError(null)}>
+                {invoiceError}
+              </Alert>
+            )}
+            <DataTable
+              columns={invoiceColumns}
+              rows={invoices}
+              getRowKey={(row) => row.id}
+              emptyMessage="No invoices yet"
+            />
+          </SectionCard>
         </div>
       </div>
 

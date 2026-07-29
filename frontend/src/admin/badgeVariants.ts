@@ -48,3 +48,23 @@ export const LEDGER_TYPE_VARIANT: Record<string, string> = {
   release: "info",
   admin_adjustment: "primary",
 };
+
+export const SUBSCRIPTION_STATUS_VARIANT: Record<string, string> = {
+  active: "success",
+  past_due: "warning",
+  expired: "danger",
+  cancelled: "secondary",
+};
+
+export const INVOICE_STATUS_VARIANT: Record<string, string> = {
+  paid: "success",
+  issued: "warning",
+  cancelled: "secondary",
+  void: "dark",
+};
+
+export const INVOICE_DOC_TYPE_LABEL: Record<string, string> = {
+  tax_invoice: "Tax invoice",
+  proforma_invoice: "Pro forma",
+  credit_note: "Credit note",
+};

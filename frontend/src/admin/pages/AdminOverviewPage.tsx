@@ -8,6 +8,7 @@ import {
   fetchListsActivity,
   fetchOverview,
   fetchRunsKpis,
+  fetchSubscriptionsKpis,
   fetchSystemHealth,
   fetchTrends,
   fetchUseCaseBreakdown,
@@ -100,6 +101,7 @@ export default function AdminOverviewPage() {
   const useCaseBreakdown = useAdminResource(fetchUseCaseBreakdown, []);
   const runsKpis = useAdminResource(fetchRunsKpis, []);
   const admins = useAdminResource(fetchAdmins, []);
+  const subKpis = useAdminResource(fetchSubscriptionsKpis, []);
 
   const providerColumns = [
     { key: "provider", header: "Provider", render: (row: ProviderHealth) => row.provider },
@@ -231,9 +233,38 @@ export default function AdminOverviewPage() {
           />
         </div>
       </div>
-      {overview.error && (
+      <div className="row g-3 mb-4">
+        <div className="col-6 col-lg-4">
+          <KpiTile
+            label="MRR (ex-GST)"
+            value={subKpis.data ? formatInrFromMinorUnits(subKpis.data.mrr_minor_units) : "—"}
+            sublabel={
+              subKpis.data ? `${formatNumber(subKpis.data.paying_count)} paying accounts` : undefined
+            }
+          />
+        </div>
+        <div className="col-6 col-lg-4">
+          <KpiTile
+            label="Past due"
+            value={subKpis.data ? formatNumber(subKpis.data.past_due_count) : "—"}
+          />
+        </div>
+        <div className="col-6 col-lg-4">
+          <KpiTile
+            label="Lapsing soon"
+            value={subKpis.data ? formatNumber(subKpis.data.lapsing_soon_count) : "—"}
+            sublabel="Period ends ≤7d or past due"
+          />
+        </div>
+      </div>
+      <div className="mb-4">
+        <Link to="/admin/subscriptions" className="small">
+          Open subscriptions →
+        </Link>
+      </div>
+      {(overview.error || subKpis.error) && (
         <div className="small mb-4" style={{ color: ADMIN_CHART_COLORS.status.critical }}>
-          {overview.error}
+          {overview.error ?? subKpis.error}
         </div>
       )}
 

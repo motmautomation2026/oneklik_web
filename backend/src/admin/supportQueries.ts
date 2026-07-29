@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
+import { findPack } from "../lib/creditPacks.js";
 import {
   AUTO_CLOSE_RESOLVED_AFTER_DAYS,
   AWAITING_REPLY_HOURS,
@@ -84,6 +85,13 @@ export interface AdminTicketDetail extends AdminTicketRow {
     company: string | null;
     available_balance: number;
     other_ticket_count: number;
+    subscription: {
+      plan_id: string;
+      plan_name: string | null;
+      status: string;
+      current_period_end: string;
+      grace_ends_at: string;
+    } | null;
   };
   messages: AdminTicketMessage[];
   events: AdminTicketEvent[];
@@ -447,7 +455,7 @@ export async function getSupportTicketDetail(ticketId: string): Promise<AdminTic
 
   const row = data as any;
 
-  const [{ data: profile }, { data: wallet }, { count: otherTickets }, { data: messages }, { data: attachments }, { data: events }] =
+  const [{ data: profile }, { data: wallet }, { count: otherTickets }, { data: messages }, { data: attachments }, { data: events }, { data: subscription }] =
     await Promise.all([
       supabaseAdmin
         .from("profiles")
@@ -474,6 +482,11 @@ export async function getSupportTicketDetail(ticketId: string): Promise<AdminTic
         .select("id, actor_id, actor_role, event_type, from_value, to_value, note, created_at")
         .eq("ticket_id", ticketId)
         .order("created_at", { ascending: true }),
+      supabaseAdmin
+        .from("subscriptions")
+        .select("plan_id, status, current_period_end, grace_ends_at")
+        .eq("user_id", row.user_id)
+        .maybeSingle(),
     ]);
 
   const messageRows = (messages ?? []) as any[];
@@ -525,6 +538,15 @@ export async function getSupportTicketDetail(ticketId: string): Promise<AdminTic
       company: profile?.company ?? null,
       available_balance: wallet?.available_balance ?? 0,
       other_ticket_count: otherTickets ?? 0,
+      subscription: subscription
+        ? {
+            plan_id: subscription.plan_id as string,
+            plan_name: findPack(subscription.plan_id as string)?.name ?? null,
+            status: subscription.status as string,
+            current_period_end: subscription.current_period_end as string,
+            grace_ends_at: subscription.grace_ends_at as string,
+          }
+        : null,
     },
     messages: messageRows.map((m) => ({
       id: m.id,

@@ -118,19 +118,27 @@ async function attachEmails<T extends { user_id: string }>(rows: T[]): Promise<(
 }
 
 // Indexed substring search on the profiles.email mirror (synced from
-// auth.users). Falls back to empty when the term is blank.
+// auth.users). Falls back to empty when the term is blank. Paged with the
+// same MAX_PAGES/PAGE_SIZE bound as every other admin scan.
 async function findUserIdsByEmailSubstring(term: string): Promise<Set<string>> {
   const needle = term.trim().toLowerCase();
   const ids = new Set<string>();
   if (!needle) return ids;
 
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id")
-    .ilike("email", `%${needle}%`)
-    .range(0, PAGE_SIZE - 1);
-  if (error) throw error;
-  for (const row of (data ?? []) as { id: string }[]) ids.add(row.id);
+  let from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("email", `%${needle}%`)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as { id: string }[];
+    if (rows.length === 0) break;
+    for (const row of rows) ids.add(row.id);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
   return ids;
 }
 

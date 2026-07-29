@@ -253,13 +253,20 @@ async function findUserIdsByEmailSubstring(term: string): Promise<Set<string>> {
   const ids = new Set<string>();
   if (!needle) return ids;
 
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id")
-    .ilike("email", `%${needle}%`)
-    .range(0, PAGE_SIZE - 1);
-  if (error) throw error;
-  for (const row of (data ?? []) as { id: string }[]) ids.add(row.id);
+  let from = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .ilike("email", `%${needle}%`)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as { id: string }[];
+    if (rows.length === 0) break;
+    for (const row of rows) ids.add(row.id);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
   return ids;
 }
 
@@ -504,10 +511,12 @@ function applyInvoicesSearchFilter(query: any, filter: InvoicesSearchFilter): an
     return filter.ids.length > 0 ? query.in("user_id", filter.ids) : query.eq("user_id", NO_MATCH_USER_ID);
   }
   if (filter.type === "doc") {
-    const t = filter.term.replace(/%/g, "");
-    // invoice #, receipt #, buyer legal name, or GSTIN
+    // Strip % (we add wildcards) and escape " for PostgREST double-quoted values.
+    // Quote the pattern so commas/periods/colons in legal names (e.g. "Pvt. Ltd.")
+    // don't break the .or() filter parser — same reason lapsingSoon quotes its ISO.
+    const t = filter.term.replace(/%/g, "").replace(/"/g, '""');
     return query.or(
-      `invoice_number.ilike.%${t}%,receipt_number.ilike.%${t}%,buyer_snapshot->>legal_name.ilike.%${t}%,buyer_snapshot->>gstin.ilike.%${t}%`,
+      `invoice_number.ilike."%${t}%",receipt_number.ilike."%${t}%",buyer_snapshot->>legal_name.ilike."%${t}%",buyer_snapshot->>gstin.ilike."%${t}%"`,
     );
   }
   return query;
@@ -537,6 +546,8 @@ async function applyInvoiceDirectoryFilters(
   query: any,
   params: Omit<GetInvoicesParams, "page" | "pageSize">,
   searchFilter: InvoicesSearchFilter,
+  /** Pre-resolved payment ids for planId — avoids re-scanning payments on every page. */
+  resolvedPlanPaymentIds?: string[],
 ): Promise<any> {
   let q = applyInvoicesSearchFilter(query, searchFilter);
   if (params.documentType) q = q.eq("document_type", params.documentType);
@@ -545,7 +556,10 @@ async function applyInvoiceDirectoryFilters(
   if (params.issuedFrom) q = q.gte("issued_at", params.issuedFrom);
   if (params.issuedTo) q = q.lte("issued_at", params.issuedTo);
   if (params.planId) {
-    const paymentIds = await paymentIdsForPlan(params.planId);
+    const paymentIds =
+      resolvedPlanPaymentIds !== undefined
+        ? resolvedPlanPaymentIds
+        : await paymentIdsForPlan(params.planId);
     q = paymentIds.length > 0 ? q.in("payment_id", paymentIds) : q.eq("payment_id", NO_MATCH_USER_ID);
   }
   return q;
@@ -650,11 +664,14 @@ export async function getAllInvoicesForExport(
   params: Omit<GetInvoicesParams, "page" | "pageSize">,
 ): Promise<AdminInvoiceListRow[]> {
   const searchFilter = await resolveInvoicesSearchFilter(params.search);
+  // Resolve once — count + each page would otherwise re-scan payments for planId.
+  const planPaymentIds = params.planId ? await paymentIdsForPlan(params.planId) : undefined;
 
   const countQuery = await applyInvoiceDirectoryFilters(
     supabaseAdmin.from("invoices").select("id", { count: "exact", head: true }),
     params,
     searchFilter,
+    planPaymentIds,
   );
   const { count, error: countError } = await countQuery;
   if (countError) throw countError;
@@ -672,6 +689,7 @@ export async function getAllInvoicesForExport(
         .range(from, from + PAGE_SIZE - 1),
       params,
       searchFilter,
+      planPaymentIds,
     );
     const { data, error } = await query;
     if (error) throw error;

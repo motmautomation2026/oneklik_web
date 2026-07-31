@@ -52,6 +52,7 @@ export default function ListsPage() {
       .from("lists")
       .select("id, name, kind, created_at, list_items(count)", { count: "exact" })
       .eq("user_id", user.id)
+      .eq("is_system", false)
       .order("created_at", { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
     if (fetchError) {

@@ -12,7 +12,6 @@ router.post("/hv/phone-reveal", requireAuth, enforceAccountStatus(), (req: Reque
     creditsPerReveal: 20,
     runType: "mobile_enrich",
     targetField: "Phone",
-    listNamePrefix: "Phone Reveal",
     providerName: "phone_finder",
     notConfiguredError: "phone_finder_webhook not configured",
   }),

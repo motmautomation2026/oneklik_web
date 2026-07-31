@@ -12,7 +12,6 @@ router.post("/hv/email-reveal", requireAuth, enforceAccountStatus(), (req: Reque
     creditsPerReveal: 2,
     runType: "email_enrich",
     targetField: "Email",
-    listNamePrefix: "Email Reveal",
     providerName: "email_finder",
     notConfiguredError: "email_finder_webhook not configured",
   }),

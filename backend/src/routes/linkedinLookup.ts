@@ -3,7 +3,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
-import { normalizePerson, type Person } from "../lib/revealFlow.js";
+import { getOrCreateScratchList, normalizePerson, type Person } from "../lib/revealFlow.js";
 import { ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
 
 const router = Router();
@@ -86,18 +86,8 @@ router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (r
     return res.json({ people });
   }
 
-  const { data: list, error: listError } = await supabaseAdmin
-    .from("lists")
-    .insert({
-      user_id: userId,
-      name: `LinkedIn Lookup — ${new Date().toISOString().slice(0, 10)}`,
-      kind: "people",
-    })
-    .select("id")
-    .single();
-
-  if (listError || !list) {
-    req.log.error({ err: listError }, "failed to create linkedin lookup list");
+  const listId = await getOrCreateScratchList(req, userId, "people");
+  if (!listId) {
     // Lookup already succeeded and nothing has been billed yet — safe to
     // still return the (unbilled, so redacted) profiles rather than fail.
     return res.json({ people: people.map((p) => ({ ...p, Email: "", Phone: "" })) });
@@ -105,17 +95,14 @@ router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (r
 
   const { data: listItems, error: itemsError } = await supabaseAdmin
     .from("list_items")
-    .insert(people.map((p) => ({ list_id: list.id, user_id: userId, data: p })))
+    .insert(people.map((p) => ({ list_id: listId, user_id: userId, data: p })))
     .select("id");
 
   if (itemsError || !listItems || listItems.length !== people.length) {
     req.log.error({ err: itemsError }, "failed to create list_items for linkedin lookup");
-    return res.json({ people: people.map((p) => ({ ...p, Email: "", Phone: "" })), list_id: list.id });
+    return res.json({ people: people.map((p) => ({ ...p, Email: "", Phone: "" })), list_id: listId });
   }
 
-  // Narrowed, non-null bindings — TS doesn't retain the guard-clause
-  // narrowing above across the chargeField closure boundary.
-  const listId = list.id as string;
   const confirmedListItems = listItems;
 
   // Bills a found field (Email or Phone) as an ordinary reveal run — but

@@ -67,7 +67,6 @@ export interface RevealConfig {
   creditsPerReveal: number;
   runType: "email_enrich" | "mobile_enrich";
   targetField: "Email" | "Phone";
-  listNamePrefix: string;
   providerName: string;
   notConfiguredError: string;
 }
@@ -220,7 +219,61 @@ async function holdCallResolve(
   return { batchFailed, resolved, affordableCount: maxAffordable, creditSkippedCount };
 }
 
-// Fresh selection from a live search result -> creates a brand new list.
+// One evergreen, hidden list per (user, kind) that reveals attach their
+// list_items to when the user never explicitly saved a list — see
+// 0021_lists_scratch_flag.sql for why this has to exist at all (billing
+// needs a persisted list_item row) and why it doesn't need a NEW list every
+// time (only the row needs to persist, not a fresh visible list). Created
+// lazily on first use, reused forever after, never shown on the Lists page.
+export async function getOrCreateScratchList(
+  req: Request,
+  userId: string,
+  kind: "people" | "company",
+): Promise<string | null> {
+  const { data: existing, error: findError } = await supabaseAdmin
+    .from("lists")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("kind", kind)
+    .eq("is_system", true)
+    .maybeSingle();
+
+  if (findError) {
+    req.log.error({ err: findError }, "failed to look up scratch list");
+    return null;
+  }
+  if (existing) return existing.id as string;
+
+  const { data: created, error: createError } = await supabaseAdmin
+    .from("lists")
+    .insert({ user_id: userId, name: "Unsaved reveals", kind, is_system: true })
+    .select("id")
+    .single();
+
+  if (createError || !created) {
+    // Unique index (one system list per user+kind) means a concurrent
+    // request may have created it first — re-read rather than treating a
+    // race as a real failure.
+    if (createError?.code === "23505") {
+      const { data: raced } = await supabaseAdmin
+        .from("lists")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("kind", kind)
+        .eq("is_system", true)
+        .maybeSingle();
+      if (raced) return raced.id as string;
+    }
+    req.log.error({ err: createError }, "failed to create scratch list");
+    return null;
+  }
+
+  return created.id as string;
+}
+
+// Fresh selection from a live search result -> attaches to the user's
+// scratch list (see getOrCreateScratchList above) rather than creating a
+// new visible list every time.
 export async function runRevealBatch(req: Request, res: Response, config: RevealConfig) {
   const webhookUrl = process.env[config.webhookEnvVar];
   if (!webhookUrl) {
@@ -236,22 +289,10 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
 
   const userId = req.user!.id;
 
-  const { data: list, error: listError } = await supabaseAdmin
-    .from("lists")
-    .insert({
-      user_id: userId,
-      name: `${config.listNamePrefix} — ${new Date().toISOString().slice(0, 10)}`,
-      kind: "people",
-    })
-    .select("id")
-    .single();
-
-  if (listError || !list) {
-    req.log.error({ err: listError }, `failed to create ${config.providerName} reveal list`);
+  const listId = await getOrCreateScratchList(req, userId, "people");
+  if (!listId) {
     return res.status(500).json({ error: "Could not start reveal" });
   }
-
-  const listId = list.id as string;
 
   const { data: listItems, error: itemsError } = await supabaseAdmin
     .from("list_items")

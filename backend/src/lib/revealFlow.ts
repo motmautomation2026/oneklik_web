@@ -266,7 +266,12 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
   const items: ListItemRef[] = people.map((p, i) => ({ id: listItems[i].id as string, person: p }));
   const result = await holdCallResolve(req, userId, listId, items, config);
 
-  if (result.batchFailed) {
+  // Fatal before any row was resolved (couldn't create the run / hold credits) —
+  // a real error, not a "not found". A provider outage that happens *after*
+  // credits were held instead resolves each row to "not found" (see
+  // holdCallResolve) and releases its hold, so it's reported like a genuine
+  // miss below rather than as a hard failure.
+  if (result.batchFailed && result.resolved.length === 0) {
     return res.status(502).json({ error: `${config.providerName} provider failed, credits released` });
   }
 
@@ -335,7 +340,7 @@ export async function runListRevealBatch(req: Request, res: Response, config: Re
 
   const result = await holdCallResolve(req, userId, listId, candidates, config);
 
-  if (result.batchFailed) {
+  if (result.batchFailed && result.resolved.length === 0) {
     return res.status(502).json({ error: `${config.providerName} provider failed, credits released` });
   }
 

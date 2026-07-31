@@ -11,6 +11,8 @@ import {
   OverlayTrigger,
   Row,
   Spinner,
+  Toast,
+  ToastContainer,
   Tooltip,
 } from "react-bootstrap";
 import { Search } from "react-bootstrap-icons";
@@ -71,6 +73,8 @@ export default function PeopleSearchPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [revealingEmailRows, setRevealingEmailRows] = useState<Set<number>>(new Set());
   const [revealingPhoneRows, setRevealingPhoneRows] = useState<Set<number>>(new Set());
+  const [notFoundEmailRows, setNotFoundEmailRows] = useState<Set<number>>(new Set());
+  const [notFoundPhoneRows, setNotFoundPhoneRows] = useState<Set<number>>(new Set());
   const [revealError, setRevealError] = useState<string | null>(null);
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
 
@@ -98,6 +102,8 @@ export default function PeopleSearchPage() {
       });
       setPeople(result.people);
       setHasSearched(true);
+      setNotFoundEmailRows(new Set());
+      setNotFoundPhoneRows(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
     } finally {
@@ -117,6 +123,8 @@ export default function PeopleSearchPage() {
       });
       setPeople(result.people);
       setHasSearched(true);
+      setNotFoundEmailRows(new Set());
+      setNotFoundPhoneRows(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI search failed");
     } finally {
@@ -175,11 +183,18 @@ export default function PeopleSearchPage() {
   async function reveal(indices: number[], field: "email" | "phone") {
     if (indices.length === 0) return;
     const setRevealing = field === "email" ? setRevealingEmailRows : setRevealingPhoneRows;
+    const setNotFound = field === "email" ? setNotFoundEmailRows : setNotFoundPhoneRows;
+    const personField = field === "email" ? "Email" : "Phone";
     const endpoint = field === "email" ? "/api/hv/email-reveal" : "/api/hv/phone-reveal";
 
     setRevealError(null);
     setRevealNotice(null);
     setRevealing((prev) => new Set([...prev, ...indices]));
+    setNotFound((prev) => {
+      const next = new Set(prev);
+      indices.forEach((i) => next.delete(i));
+      return next;
+    });
     try {
       const selectedPeople = indices.map((i) => people[i]);
       const result = await apiPost<{ people: Person[]; skipped_count?: number }>(endpoint, {
@@ -189,6 +204,13 @@ export default function PeopleSearchPage() {
         const next = [...prev];
         indices.forEach((idx, j) => {
           next[idx] = result.people[j];
+        });
+        return next;
+      });
+      setNotFound((prev) => {
+        const next = new Set(prev);
+        indices.forEach((idx, j) => {
+          if (!result.people[j]?.[personField]) next.add(idx);
         });
         return next;
       });
@@ -389,12 +411,6 @@ export default function PeopleSearchPage() {
                   </Alert>
                 )}
 
-                {revealError && (
-                  <Alert variant="danger" dismissible onClose={() => setRevealError(null)}>
-                    {revealError}
-                  </Alert>
-                )}
-
                 {revealNotice && (
                   <Alert variant="warning" dismissible onClose={() => setRevealNotice(null)}>
                     {revealNotice}
@@ -509,6 +525,8 @@ export default function PeopleSearchPage() {
                                 <span>{p.Email}</span>
                               ) : revealingEmailRows.has(i) ? (
                                 <Spinner animation="border" size="sm" />
+                              ) : notFoundEmailRows.has(i) ? (
+                                <span className="text-body-secondary">Not found</span>
                               ) : (
                                 <Button size="sm" variant="outline-primary" onClick={() => reveal([i], "email")}>
                                   Reveal
@@ -520,6 +538,8 @@ export default function PeopleSearchPage() {
                                 <span>{p.Phone}</span>
                               ) : revealingPhoneRows.has(i) ? (
                                 <Spinner animation="border" size="sm" />
+                              ) : notFoundPhoneRows.has(i) ? (
+                                <span className="text-body-secondary">Not found</span>
                               ) : (
                                 <Button size="sm" variant="outline-primary" onClick={() => reveal([i], "phone")}>
                                   Reveal
@@ -558,6 +578,15 @@ export default function PeopleSearchPage() {
           </Button>
         </Modal.Footer>
       </Modal>
+
+      <ToastContainer position="bottom-end" containerPosition="fixed" className="p-3">
+        <Toast bg="danger" show={!!revealError} onClose={() => setRevealError(null)} delay={6000} autohide>
+          <Toast.Header closeVariant="white">
+            <strong className="me-auto">Reveal failed</strong>
+          </Toast.Header>
+          <Toast.Body className="text-white">{revealError}</Toast.Body>
+        </Toast>
+      </ToastContainer>
     </AppLayout>
   );
 }

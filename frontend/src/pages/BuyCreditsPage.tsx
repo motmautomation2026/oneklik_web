@@ -366,7 +366,7 @@ export default function BuyCreditsPage() {
                           )}
                           <div className="mb-3">
                             <div className="h3 mb-1 d-flex align-items-center gap-2">
-                              {formatMoney(pack.price_minor_units, pack.currency)}
+                              {formatMoney(pack.price_minor_units, pack.currency, { trimTrailingZeros: true })}
                               <OverlayTrigger
                                 placement="top"
                                 overlay={

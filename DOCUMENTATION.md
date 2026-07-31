@@ -19,17 +19,18 @@ Finding the right company and the right person to talk to usually means stitchin
 
 ## How Credits Work
 
-One-Klik runs on a simple credit system instead of a fixed monthly seat price:
+One-Klik runs on a credit system funded by a monthly subscription, rather than a fixed per-seat price:
 
-- Every account gets a starter grant of free credits to try the product.
+- Every account gets a starter grant of free credits to try the product before subscribing.
 - **Searches** (Company Search, People Search, and their AI-sentence variants) are billed per batch of results delivered.
 - **Reveals** (Email, Phone, LinkedIn Lookup) are billed **only when a result is actually found** — a search that comes up empty costs nothing.
-- Credits are purchased in packs, don't expire, and roll over indefinitely — buy once, use whenever.
-- Every transaction — holds, charges, refunds, and purchases — is recorded in an append-only ledger, so your balance history is always fully auditable from your account's Wallet page.
+- Plans — **Starter**, **Growth**, and **Business** — each grant a set number of credits every month, with a custom **Enterprise** tier available for larger volumes.
+- Renewing the same plan or upgrading carries over unused credits; downgrading does not. A short buffer period after each due date protects against a delayed or failed renewal payment before access is affected.
+- Every transaction — holds, charges, refunds, and subscription payments — is recorded in an append-only ledger, so your balance history is always fully auditable from your account's Wallet page.
 
 ## Billing & Invoicing
 
-For customers who need one, One-Klik issues proper GST tax invoices for every purchase — with sequential invoice numbering, correct CGST/SGST or IGST tax splitting based on your billing state, and downloadable PDF receipts, all accessible from your account's Billing page.
+One-Klik issues proper GST tax invoices for every subscription payment — with sequential invoice numbering, correct CGST/SGST or IGST tax splitting based on your billing state, and downloadable PDF documents. Upcoming renewals are billed via a pro forma invoice ahead of payment, replaced by a finalized invoice once paid. All of this is accessible from your account's Billing hub, alongside your plan status and billing details.
 
 ## Support
 

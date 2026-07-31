@@ -1,0 +1,7 @@
+1) Finalize seller identity for real invoicing — sellerIdentity.ts still has placeholder billing_email/phone. Once real customers receive real tax invoices, this needs to be accurate.
+2) Landing Page
+3) New Domain & Logo
+4) Profesional Phone & Emails - Done
+5) Cloudflare
+6) Switch from rzp_test_... keys to real rzp_live_... keys, generate a new live webhook secret
+7) Data Vendors For Waterfall

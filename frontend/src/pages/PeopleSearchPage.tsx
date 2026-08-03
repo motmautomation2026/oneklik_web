@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -56,6 +57,8 @@ const fetchJobTitleSuggestions = (query: string) => fetchProspeoSuggestions("job
 
 export default function PeopleSearchPage() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [domains, setDomains] = useState<string[]>([]);
   const [jobTitles, setJobTitles] = useState<string[]>([]);
@@ -69,6 +72,24 @@ export default function PeopleSearchPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
+
+  // Consumes companies handed over from Company Search's "Search the people"
+  // button (router state), then clears the state so back/refresh doesn't
+  // silently re-apply it.
+  useEffect(() => {
+    const incoming = (location.state as { domains?: string[] } | null)?.domains;
+    if (incoming && incoming.length > 0) {
+      setDomains(incoming);
+      setPrefillNotice(
+        `Showing people for ${incoming.length} compan${incoming.length === 1 ? "y" : "ies"} from your last company search.`,
+      );
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // Runs once on mount only — deliberately ignores location/navigate identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [revealingEmailRows, setRevealingEmailRows] = useState<Set<number>>(new Set());
@@ -404,6 +425,12 @@ export default function PeopleSearchPage() {
                     )}
                   </div>
                 </div>
+
+                {prefillNotice && (
+                  <Alert variant="info" dismissible onClose={() => setPrefillNotice(null)}>
+                    {prefillNotice}
+                  </Alert>
+                )}
 
                 {saved && (
                   <Alert variant="success" dismissible onClose={() => setSaved(false)}>

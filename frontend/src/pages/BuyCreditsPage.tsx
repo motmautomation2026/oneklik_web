@@ -56,7 +56,7 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
-const SALES_EMAIL = "sales@oneklik.com";
+const SALES_EMAIL = "sales@quickicp.com";
 
 const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
   starter: { label: "Starter", bestFor: "Individual users" },
@@ -190,7 +190,7 @@ export default function BuyCreditsPage() {
         amount: checkout.amount,
         currency: checkout.currency,
         order_id: checkout.order_id,
-        name: "One-Klik",
+        name: "Quick ICP",
         description: `${pack.credits.toLocaleString()} credits`,
         prefill: checkout.prefill ?? {},
         // Client handler is never trusted as proof of payment — polling only.
@@ -198,7 +198,7 @@ export default function BuyCreditsPage() {
         modal: {
           ondismiss: () => setBuyingPackId(null),
         },
-        theme: { color: "#563da4" },
+        theme: { color: "#2262f0" },
       });
       razorpay.open();
     } catch (err) {
@@ -440,7 +440,7 @@ export default function BuyCreditsPage() {
                   <Button
                     variant="outline-primary"
                     className="w-100"
-                    href={`mailto:${SALES_EMAIL}?subject=One-Klik%20Enterprise%20plan`}
+                    href={`mailto:${SALES_EMAIL}?subject=Quick%20ICP%20Enterprise%20plan`}
                     target="_blank"
                     rel="noopener noreferrer"
                   >

@@ -480,7 +480,9 @@ export async function finalizeProformaPayment(args: {
 
   const resolvedId = invoiceId as string;
 
-  // Same-row finalize keeps the old issued_at; correct Date Paid in-app only.
+  // Same-row finalize keeps the old issued_at (and whatever seller_snapshot was
+  // frozen when the proforma was first issued, possibly long before this
+  // payment) — correct Date Paid and refresh the seller snapshot in-app only.
   if (resolvedId === args.proformaId) {
     const paidAt = new Date();
     const { error: dateError } = await supabaseAdmin
@@ -489,6 +491,7 @@ export async function finalizeProformaPayment(args: {
         invoice_date: istCalendarDate(paidAt),
         issued_at: paidAt.toISOString(),
         updated_at: paidAt.toISOString(),
+        seller_snapshot: loadSellerSnapshot().seller,
       })
       .eq("id", resolvedId)
       .eq("document_type", "tax_invoice")

@@ -43,7 +43,7 @@ export function renderPaymentReceiptHtml(model: PaymentReceiptRenderModel): stri
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .page { width: 210mm; min-height: 297mm; padding: 48px 48px 40px; margin: 0 auto; }
-    .brand { color: #563da4; font-size: 22px; font-weight: 700; margin: 0 0 8px; }
+    .brand { color: #2262f0; font-size: 22px; font-weight: 700; margin: 0 0 8px; }
     h1 { margin: 0 0 8px; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
     .ack { color: #444; font-size: 13px; margin: 0 0 28px; }
     .meta { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
@@ -51,19 +51,19 @@ export function renderPaymentReceiptHtml(model: PaymentReceiptRenderModel): stri
     .meta .label { width: 150px; font-weight: 600; color: #333; }
     .meta .mono { font-variant-numeric: tabular-nums; }
     .meta .paid { color: #1a7f37; font-weight: 700; }
-    .rule { border: none; border-top: 1.5px solid #563da4; margin: 22px 0; }
-    .section-label { color: #563da4; font-weight: 700; font-size: 13px; margin: 0 0 10px; }
+    .rule { border: none; border-top: 1.5px solid #2262f0; margin: 22px 0; }
+    .section-label { color: #2262f0; font-weight: 700; font-size: 13px; margin: 0 0 10px; }
     .buyer-name { font-weight: 700; font-size: 14px; margin: 0 0 4px; }
     .muted { color: #444; font-size: 13px; line-height: 1.55; }
-    .amount { color: #563da4; font-weight: 700; font-size: 16px; }
+    .amount { color: #2262f0; font-weight: 700; font-size: 16px; }
     .footer { margin-top: 28px; font-size: 12px; color: #666; line-height: 1.6; }
     .thanks { margin-top: 16px; }
-    .thanks .brand-sm { color: #563da4; font-weight: 700; }
+    .thanks .brand-sm { color: #2262f0; font-weight: 700; }
   </style>
 </head>
 <body>
   <div class="page">
-    <p class="brand">One-Klik</p>
+    <p class="brand">Quick ICP</p>
     <h1>Payment Receipt</h1>
     <p class="ack">This is to acknowledge that we have received your payment.</p>
 

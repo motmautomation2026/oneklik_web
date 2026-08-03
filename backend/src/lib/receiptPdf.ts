@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 import type { PaymentReceiptRenderModel } from "./receiptHtml.js";
 
-const BRAND = "#563da4";
+const BRAND = "#2262f0";
 const PAID = "#1a7f37";
 const PAGE_MARGIN = 48;
 const CONTENT_WIDTH = 595.28 - PAGE_MARGIN * 2;
@@ -17,7 +17,7 @@ export function renderPaymentReceiptPdf(model: PaymentReceiptRenderModel): Promi
       margins: { top: PAGE_MARGIN, bottom: PAGE_MARGIN, left: PAGE_MARGIN, right: PAGE_MARGIN },
       info: {
         Title: model.receipt_number,
-        Author: "One-Klik",
+        Author: "Quick ICP",
         Subject: "Payment Receipt",
       },
     });
@@ -31,7 +31,7 @@ export function renderPaymentReceiptPdf(model: PaymentReceiptRenderModel): Promi
     const right = PAGE_MARGIN + CONTENT_WIDTH;
     let y = PAGE_MARGIN;
 
-    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("One-Klik", left, y);
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("Quick ICP", left, y);
     y = doc.y + 6;
     doc.fillColor("#111").font("Helvetica-Bold").fontSize(22).text("Payment Receipt", left, y);
     y = doc.y + 8;

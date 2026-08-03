@@ -13,7 +13,7 @@ import {
   X,
 } from "react-bootstrap-icons";
 import { fetchSupportBadge } from "../api/adminApi";
-import logo from "../../assets/oneklik_logo_small.png";
+import logo from "../../assets/quick_icp_logo_small.png";
 
 interface AdminNavItem {
   to: string;
@@ -102,7 +102,7 @@ export default function AdminSidebar({ mobileOpen, onClose }: AdminSidebarProps)
         <div className="app-sidebar-header">
           <Link to="/admin" className="app-sidebar-brand" onClick={onClose}>
             <img src={logo} alt="" className="app-sidebar-brand-logo" />
-            <span className="app-sidebar-brand-full">One-Klik Admin</span>
+            <span className="app-sidebar-brand-full">Quick ICP Admin</span>
           </Link>
           <button
             type="button"

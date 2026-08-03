@@ -152,8 +152,22 @@ function paymentMethodLabel(snapshot: Record<string, unknown>): string {
   return "Razorpay";
 }
 
+/**
+ * Seller block for *rendering*. Deliberately reads the live hardcoded identity
+ * instead of trusting `seller_snapshot` frozen on the row at issue time.
+ *
+ * The snapshot is written by whichever backend handles the payment, so an older
+ * deploy (or a webhook that beats the checkout-verify call) can freeze stale
+ * branding onto a brand-new invoice. Legal entity is unchanged across the
+ * rebrand — same GSTIN/PAN/address — so only the trade name and contact details
+ * move, and every past and future document stays on current branding.
+ */
+function sellerForDisplay(snapshot: SellerSnapshot | null | undefined): SellerSnapshot {
+  return { ...(snapshot ?? {}), ...loadSellerSnapshot().seller };
+}
+
 export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | null): InvoiceRenderModel {
-  const seller = invoice.seller_snapshot;
+  const seller = sellerForDisplay(invoice.seller_snapshot);
   const buyer = invoice.buyer_snapshot;
   const half = halfRateLabel(invoice.tax_rate_bps);
   const full = rateLabel(invoice.tax_rate_bps);
@@ -281,6 +295,7 @@ export function invoiceToRenderModel(invoice: InvoiceRow, buyerEmail?: string | 
 
 export function invoiceToReceiptModel(invoice: InvoiceRow, buyerEmail?: string | null): PaymentReceiptRenderModel {
   const buyer = invoice.buyer_snapshot;
+  const sellerDisplay = sellerForDisplay(invoice.seller_snapshot);
   const emailFromBuyer = typeof buyer.email === "string" ? buyer.email : null;
   const moneyLabel = formatMoneyMinor(invoice.total_minor, invoice.currency);
   const paidAt = new Date(invoice.issued_at);
@@ -314,8 +329,8 @@ export function invoiceToReceiptModel(invoice: InvoiceRow, buyerEmail?: string |
     description,
     amount_paid_label: moneyLabel,
     payment_method: paymentMethodLabel(snap),
-    seller_name: invoice.seller_snapshot?.legal_name ?? "One-Klik",
-    seller_support_email: invoice.seller_snapshot?.billing_email ?? "support@oneklik.demo",
+    seller_name: sellerDisplay.legal_name ?? "Quick ICP",
+    seller_support_email: sellerDisplay.billing_email ?? "contact@quickicp.com",
   };
 }
 

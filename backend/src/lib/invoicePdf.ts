@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 import type { InvoiceRenderModel } from "./invoiceHtml.js";
 
-const BRAND = "#563da4";
+const BRAND = "#2262f0";
 const PAGE_MARGIN = 48;
 const CONTENT_WIDTH = 595.28 - PAGE_MARGIN * 2;
 
@@ -16,7 +16,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
       margins: { top: PAGE_MARGIN, bottom: PAGE_MARGIN, left: PAGE_MARGIN, right: PAGE_MARGIN },
       info: {
         Title: model.invoice_number,
-        Author: "One-Klik",
+        Author: "Quick ICP",
         Subject: model.document_title,
       },
     });
@@ -31,7 +31,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     let y = PAGE_MARGIN;
 
     // Header: brand left, title + INV right
-    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("One-Klik", left, y, { lineBreak: false });
+    doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(18).text("Quick ICP", left, y, { lineBreak: false });
     doc.fillColor("#111").font("Helvetica-Bold").fontSize(20).text(model.document_title, left, y, {
       width: CONTENT_WIDTH,
       align: "right",
@@ -124,7 +124,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     y = Math.max(ly, by) + 18;
 
     // Line items header
-    doc.rect(left, y, CONTENT_WIDTH, 22).fill("#efe9fb");
+    doc.rect(left, y, CONTENT_WIDTH, 22).fill("#e8f0ff");
     doc.fillColor(BRAND).font("Helvetica-Bold").fontSize(9);
     const cols = [
       { x: left + 8, w: 250, label: "Description", align: "left" as const },
@@ -159,7 +159,7 @@ export function renderInvoicePdf(model: InvoiceRenderModel): Promise<Buffer> {
     const totalsX = right - 200;
     for (const t of totals) {
       if (t.bold) {
-        doc.rect(totalsX, y - 2, 200, 18).fill("#efe9fb");
+        doc.rect(totalsX, y - 2, 200, 18).fill("#e8f0ff");
       }
       doc.fillColor("#111").font(t.bold ? "Helvetica-Bold" : "Helvetica").fontSize(9);
       doc.text(t.label, totalsX + 8, y, { width: 90 });

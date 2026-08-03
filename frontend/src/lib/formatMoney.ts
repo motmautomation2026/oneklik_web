@@ -1,14 +1,20 @@
-export function formatMoney(minorUnits: number, currency = "INR"): string {
+export function formatMoney(
+  minorUnits: number,
+  currency = "INR",
+  options?: { trimTrailingZeros?: boolean },
+): string {
   const value = minorUnits / 100;
+  const trim = options?.trimTrailingZeros ?? false;
+  const minimumFractionDigits = trim && Number.isInteger(value) ? 0 : 2;
   try {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency,
-      minimumFractionDigits: 2,
+      minimumFractionDigits,
       maximumFractionDigits: 2,
     }).format(value);
   } catch {
-    return `${currency} ${value.toFixed(2)}`;
+    return `${currency} ${trim && Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)}`;
   }
 }
 

@@ -344,9 +344,9 @@ function withDownloadToolbar(html: string, pdfUrl: string, filename: string, lab
     display: inline-block;
     padding: 6px 14px;
     border-radius: 6px;
-    background: #563da4; color: #fff; text-decoration: none; font-weight: 600;
+    background: #2262f0; color: #fff; text-decoration: none; font-weight: 600;
   }
-  .ok-admin-doc-toolbar a:hover { background: #6b52c4; }
+  .ok-admin-doc-toolbar a:hover { background: #4c86f5; }
   @media print { .ok-admin-doc-toolbar { display: none !important; } }
 </style>
 <div class="ok-admin-doc-toolbar">

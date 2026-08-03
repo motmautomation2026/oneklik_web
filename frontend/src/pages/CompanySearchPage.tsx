@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   Badge,
@@ -20,6 +21,7 @@ import TagInput from "../components/TagInput";
 import ClampedNumberInput from "../components/ClampedNumberInput";
 import { apiPost } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
+import { normalizeDomain } from "../lib/domain";
 import { useAuth } from "../lib/AuthProvider";
 
 const SIZE_OPTIONS = [
@@ -92,6 +94,7 @@ function creditsForCount(count: number): number {
 
 export default function CompanySearchPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [industries, setIndustries] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>(["India"]);
@@ -105,6 +108,8 @@ export default function CompanySearchPage() {
   const [hasSearched, setHasSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [listName, setListName] = useState("");
@@ -120,6 +125,7 @@ export default function CompanySearchPage() {
     setLoading(true);
     setError(null);
     setSaved(false);
+    setSelected(new Set());
     try {
       const result = await apiPost<{ companies: Company[] }>("/api/hv/company-search", {
         industries,
@@ -142,6 +148,7 @@ export default function CompanySearchPage() {
     setLoading(true);
     setError(null);
     setSaved(false);
+    setSelected(new Set());
     try {
       const result = await apiPost<{ companies: Company[] }>("/api/hv/company-search-ai", {
         sentence: sentence.trim(),
@@ -190,6 +197,32 @@ export default function CompanySearchPage() {
     }
   }
 
+  function toggleRow(index: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === companies.length ? new Set() : new Set(companies.map((_, i) => i))));
+  }
+
+  const selectedDomains = Array.from(
+    new Set(
+      Array.from(selected)
+        .map((i) => normalizeDomain(companies[i]?.Website))
+        .filter((d): d is string => !!d),
+    ),
+  );
+
+  function handleSearchThePeople() {
+    if (selectedDomains.length === 0) return;
+    navigate("/people", { state: { domains: selectedDomains } });
+  }
+
   const findButton = (
     <Button type="submit" variant="primary" className="w-100" disabled={!canSearch || loading}>
       {loading ? (
@@ -200,6 +233,12 @@ export default function CompanySearchPage() {
       ) : (
         "Find Companies"
       )}
+    </Button>
+  );
+
+  const searchPeopleButton = (
+    <Button size="sm" variant="primary" disabled={selectedDomains.length === 0} onClick={handleSearchThePeople}>
+      {`Search the people (${selected.size})`}
     </Button>
   );
 
@@ -316,11 +355,25 @@ export default function CompanySearchPage() {
                     Companies
                     {hasSearched && <Badge bg="primary">{companies.length}</Badge>}
                   </h2>
-                  {companies.length > 0 && (
-                    <Button size="sm" variant="outline-primary" onClick={openSaveModal}>
-                      Save to list
-                    </Button>
-                  )}
+                  <div className="d-flex align-items-center gap-2">
+                    {selected.size > 0 && (
+                      <>
+                        <span className="small text-body-secondary">{selected.size} selected</span>
+                        {selectedDomains.length > 0 ? (
+                          searchPeopleButton
+                        ) : (
+                          <OverlayTrigger overlay={<Tooltip>Selected companies have no website on file</Tooltip>}>
+                            <span className="d-inline-block">{searchPeopleButton}</span>
+                          </OverlayTrigger>
+                        )}
+                      </>
+                    )}
+                    {companies.length > 0 && (
+                      <Button size="sm" variant="outline-primary" onClick={openSaveModal}>
+                        Save to list
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {saved && (
@@ -355,6 +408,15 @@ export default function CompanySearchPage() {
                     <table className="table table-hover align-middle">
                       <thead>
                         <tr>
+                          <th>
+                            <input
+                              type="checkbox"
+                              className="form-check-input"
+                              checked={companies.length > 0 && selected.size === companies.length}
+                              onChange={toggleSelectAll}
+                              aria-label="Select all"
+                            />
+                          </th>
                           <th>Company</th>
                           <th>Website</th>
                           <th>Location</th>
@@ -367,6 +429,15 @@ export default function CompanySearchPage() {
                       <tbody>
                         {companies.map((c, i) => (
                           <tr key={i}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                className="form-check-input"
+                                checked={selected.has(i)}
+                                onChange={() => toggleRow(i)}
+                                aria-label={`Select ${c.Company}`}
+                              />
+                            </td>
                             <td className="fw-semibold">{c.Company}</td>
                             <td>
                               {c.Website ? (

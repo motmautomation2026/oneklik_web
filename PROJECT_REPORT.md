@@ -54,7 +54,7 @@ Two access paths into the database exist by design: direct client-to-Supabase (f
 
 ## 5. Database Design & Migration History
 
-The schema evolved across 20 migrations, applied in strict order:
+The schema evolved across 21 migrations, applied in strict order:
 
 | # | Purpose |
 |---|---|
@@ -78,6 +78,7 @@ The schema evolved across 20 migrations, applied in strict order:
 | 0018 | Admin KPI aggregate queries |
 | 0019 | Denormalized `profiles.email` (for admin search) |
 | 0020 | Admin overview sum aggregates |
+| 0021 | `lists.is_system` flag + one-per-user-per-kind unique index, backing the reveal "scratch list" (see §6.4) |
 
 **Design principles carried through every migration:**
 - All wallet/ledger mutations happen only inside `security definer` RPC functions — application code never issues raw `UPDATE`s against `credit_wallets` or `credit_ledger`.
@@ -102,11 +103,13 @@ The schema evolved across 20 migrations, applied in strict order:
 ### 6.3 Email / Phone Reveal & LinkedIn Lookup
 - Reveals are billed per-row, **only if the field is actually found** (`fn_resolve_row` with outcome `found`/`not_found`).
 - Batch reveals use an affordability-aware flow (`revealFlow.ts`): computes `maxAffordable = floor(balance / creditsPerReveal)`, processes only that many rows, and reports how many were skipped — rather than holding the whole batch's worst case and failing outright on a partial shortfall.
+- Failure classification is deliberately narrow: `result.batchFailed && result.resolved.length === 0` (fatal before any row was resolved — couldn't create the run or hold credits) is reported as a real 502 error. A provider outage that happens *after* credits were already held instead resolves each row to `not_found` and releases its hold, surfacing as an ordinary miss rather than a hard failure — refined after an earlier version conflated the two.
 - LinkedIn Lookup always checks both email and phone; the lookup itself is free, gated only by a `balance > 0` check to prevent unlimited free calls against paid third-party infrastructure at zero balance. Email and phone are billed independently and only if found.
 - Current reveal pricing: Email 2 credits, Phone/Contact 20 credits.
 
 ### 6.4 Lists
-- Every search/reveal result can be saved to a list (creates a new list or appends).
+- Every search/reveal result can be explicitly saved to a list via **Save to list** — creates a new, named, user-visible list.
+- **Scratch list**: every reveal (Email/Phone Reveal, LinkedIn Lookup) still needs a persisted `list_item` row to attach its billing outcome to (`enrichment_results.list_item_id`, and `list_items.list_id` is `NOT NULL`) — but rather than creating a brand-new visibly-named list on every single reveal action, each user gets **one evergreen, hidden system list per kind** (`lists.is_system = true`, migration 0021), created lazily on first use and reused forever after. This replaced the original behavior where every reveal — even a single-row one the user never asked to save — created its own uniquely-named list, cluttering the Lists page. The `is_system` column is excluded from the Lists page query; the explicit "Save to list" path is untouched and was never affected.
 - **Merge**: combines two or more same-kind lists into a new list, deduplicated by a natural key (website/company name, or email/social/full-name for people) — originals are left untouched.
 - **Re-run enrichment on a saved list**: reveals only rows that don't already have the target field, so re-running never re-charges for already-resolved rows.
 

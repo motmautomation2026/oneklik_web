@@ -28,7 +28,7 @@ export default function SupportLayout({ children }: { children: ReactNode }) {
     <div className="min-vh-100 bg-light">
       <div className="border-bottom bg-white py-2 px-3">
         <Container style={{ maxWidth: 820 }} className="px-0 d-flex align-items-center justify-content-between">
-          <span className="fw-semibold">One-Klik Support</span>
+          <span className="fw-semibold">Quick ICP Support</span>
           <Link to="/dashboard" className="small">
             Back to account status
           </Link>

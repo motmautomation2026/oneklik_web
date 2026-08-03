@@ -20,7 +20,7 @@ export interface SellerSnapshot {
 }
 
 const HARDCODED_SELLER: SellerSnapshot = {
-  legal_name: "One-Klik",
+  legal_name: "Quick ICP",
   gstin: "27AWYPK0264G1Z6",
   address_line1: "FIRST FLOOR, Reality Warehousing Pvt Ltd, GAT NO.-1337/1, Pune Nagar Road",
   address_line2: "Above Reliance Smart, Wagholi, Pune",
@@ -30,7 +30,7 @@ const HARDCODED_SELLER: SellerSnapshot = {
   state_name: "Maharashtra",
   postal_code: "412207",
   country: "IN",
-  billing_email: "billing@oneklik.demo",
+  billing_email: "billing@quickicp.demo",
   phone: "+91 99999 00000",
   pan: "AWYPK0264G",
 };

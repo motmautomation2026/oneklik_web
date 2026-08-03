@@ -112,7 +112,7 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
       display: flex; justify-content: space-between; align-items: flex-start;
       margin-bottom: 24px;
     }
-    .logo { margin: 0; font-size: 24px; font-weight: 700; color: #563da4; }
+    .logo { margin: 0; font-size: 24px; font-weight: 700; color: #2262f0; }
     .doc-right { text-align: right; }
     .doc-right h1 { margin: 0; font-size: 26px; font-weight: 700; }
     .doc-right .inv-no { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; color: #333; }
@@ -120,24 +120,24 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
       margin-bottom: 24px; font-size: 13px; line-height: 1.7;
     }
     .summary .label { font-weight: 600; color: #333; display: inline-block; width: 110px; }
-    .summary .amount-due { color: #563da4; font-size: 20px; font-weight: 700; margin: 8px 0; }
+    .summary .amount-due { color: #2262f0; font-size: 20px; font-weight: 700; margin: 8px 0; }
     .badge {
       display: inline-block; padding: 4px 12px; border-radius: 999px;
       font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
     }
-    .badge.due { background: #efe9fb; color: #563da4; }
+    .badge.due { background: #e8f0ff; color: #2262f0; }
     .badge.paid { background: #e6f6ec; color: #1a7f37; }
     .badge.void { background: #eee; color: #555; }
     .parties { display: flex; gap: 40px; margin: 24px 0 28px; }
     .party { flex: 1; font-size: 12px; line-height: 1.55; color: #222; }
-    .party .title { font-size: 12px; font-weight: 700; color: #563da4; margin-bottom: 6px; }
+    .party .title { font-size: 12px; font-weight: 700; color: #2262f0; margin-bottom: 6px; }
     .party .name { font-weight: 700; }
     table.items {
       width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px;
     }
     table.items thead th {
       text-align: left; font-weight: 600; padding: 10px 8px;
-      background: #efe9fb; color: #563da4;
+      background: #e8f0ff; color: #2262f0;
     }
     table.items thead th.num, table.items td.num { text-align: right; }
     table.items thead th.qty, table.items td.qty { text-align: center; width: 48px; }
@@ -151,12 +151,12 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
     table.totals td { padding: 7px 8px; border-bottom: 1px solid #ececec; }
     table.totals td.num { text-align: right; }
     table.totals tr.bold td { font-weight: 700; }
-    table.totals tr.highlight td { background: #efe9fb; }
-    .due-line { color: #563da4; font-weight: 700; font-size: 14px; text-align: right; margin: -16px 0 28px; padding-right: 8px; }
+    table.totals tr.highlight td { background: #e8f0ff; }
+    .due-line { color: #2262f0; font-weight: 700; font-size: 14px; text-align: right; margin: -16px 0 28px; padding-right: 8px; }
     .pay-box { margin: 8px 0 24px; font-size: 12px; color: #333; line-height: 1.6; }
     .pay-box .row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-start; }
     .pay-box .icon {
-      width: 28px; height: 28px; border-radius: 50%; background: #563da4; color: #fff;
+      width: 28px; height: 28px; border-radius: 50%; background: #2262f0; color: #fff;
       display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0;
     }
     .pay-box .title { font-weight: 700; }
@@ -168,7 +168,7 @@ export function renderInvoiceHtml(model: InvoiceRenderModel): string {
 <body>
   <div class="page">
     <div class="header">
-      <p class="logo">One-Klik</p>
+      <p class="logo">Quick ICP</p>
       <div class="doc-right">
         <h1>${escapeHtml(model.document_title)}</h1>
         <div class="inv-no mono">${escapeHtml(model.invoice_number)}</div>

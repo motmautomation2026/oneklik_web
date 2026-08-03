@@ -197,7 +197,7 @@ export default function SupportTicketPage() {
               <Card.Body className="py-3">
                 <div className="small text-body-secondary mb-2">
                   <span className="fw-semibold text-body">
-                    {message.author_role === "system" ? "System" : fromUs ? "One-Klik Support" : "You"}
+                    {message.author_role === "system" ? "System" : fromUs ? "Quick ICP Support" : "You"}
                   </span>
                   {" · "}
                   {formatWhen(message.created_at)}

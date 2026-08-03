@@ -29,32 +29,33 @@
   src: url('/fonts/Inter-700.woff2') format('woff2');
 }
 
-/* ── Brand palette — derived from the One-Klik brand purple #CBC3E3 ─────
-   Same hue (255°) at every stop so the scale reads as one considered
-   color, not "a purple and some unrelated greys." ─────────────────────── */
+/* ── Brand palette — derived from the Quick ICP brand blue
+   oklch(0.548 0.223 262.9) ─────────────────────────────────────────────
+   Same hue (262.9°) at every stop so the scale reads as one considered
+   color, not "a blue and some unrelated greys." ─────────────────────── */
 
 :root {
-  --brand-50: #f6f4fb;
-  --brand-100: #e9e5f5;
-  --brand-300: #cbc3e3;
-  --brand-600: #563da4;
-  --brand-700: #422d80;
-  --brand-900: #261e3e;
+  --brand-50: #eef5ff;
+  --brand-100: #d8e9ff;
+  --brand-300: #9cbeff;
+  --brand-600: #2262f0;
+  --brand-700: #124ac5;
+  --brand-900: #0c2459;
 
-  --ink: #261e3e;
-  --ink-dim: #6b6380;
-  --line: #ded9ea;
-  --page-bg: #faf9fd;
+  --ink: #162544;
+  --ink-dim: #5e697e;
+  --line: #cfd8e9;
+  --page-bg: #f7faff;
 
   --font-sans: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   --bs-primary: var(--brand-600);
-  --bs-primary-rgb: 86, 61, 164;
+  --bs-primary-rgb: 34, 98, 240;
   --bs-body-font-family: var(--font-sans);
   --bs-link-color: var(--brand-600);
-  --bs-link-color-rgb: 86, 61, 164;
+  --bs-link-color-rgb: 34, 98, 240;
   --bs-link-hover-color: var(--brand-700);
-  --bs-link-hover-color-rgb: 66, 45, 128;
+  --bs-link-hover-color-rgb: 18, 74, 197;
 }
 
 * {
@@ -105,7 +106,7 @@ h6 {
   --bs-btn-active-border-color: var(--brand-700);
   --bs-btn-disabled-bg: var(--brand-300);
   --bs-btn-disabled-border-color: var(--brand-300);
-  --bs-btn-focus-box-shadow: 0 0 0 0.25rem rgba(86, 61, 164, 0.35);
+  --bs-btn-focus-box-shadow: 0 0 0 0.25rem rgba(34, 98, 240, 0.35);
   font-weight: 500;
 }
 
@@ -116,7 +117,7 @@ h6 {
   --bs-btn-hover-border-color: var(--brand-600);
   --bs-btn-active-bg: var(--brand-600);
   --bs-btn-active-border-color: var(--brand-600);
-  --bs-btn-focus-box-shadow: 0 0 0 0.25rem rgba(86, 61, 164, 0.35);
+  --bs-btn-focus-box-shadow: 0 0 0 0.25rem rgba(34, 98, 240, 0.35);
   font-weight: 500;
 }
 
@@ -150,7 +151,7 @@ h6 {
 .form-control:focus,
 .form-select:focus {
   border-color: var(--brand-300);
-  box-shadow: 0 0 0 0.25rem rgba(86, 61, 164, 0.15);
+  box-shadow: 0 0 0 0.25rem rgba(34, 98, 240, 0.15);
 }
 
 .dropdown-item:hover,
@@ -274,7 +275,7 @@ label.text-uppercase,
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 6px;
-  box-shadow: 0 6px 16px rgba(38, 30, 62, 0.12);
+  box-shadow: 0 6px 16px rgba(22, 37, 68, 0.12);
   max-height: 220px;
   overflow-y: auto;
 }
@@ -487,7 +488,7 @@ label.text-uppercase,
   .app-sidebar-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(38, 30, 62, 0.45);
+    background: rgba(22, 37, 68, 0.45);
     z-index: 1035;
   }
 }
@@ -517,7 +518,7 @@ label.text-uppercase,
 .app-topbar {
   padding-top: 0.65rem;
   padding-bottom: 0.65rem;
-  box-shadow: 0 1px 2px rgba(38, 30, 62, 0.05);
+  box-shadow: 0 1px 2px rgba(22, 37, 68, 0.05);
 }
 
 .app-topbar-toolbar {
@@ -528,7 +529,7 @@ label.text-uppercase,
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.3rem;
-  box-shadow: 0 1px 3px rgba(38, 30, 62, 0.06);
+  box-shadow: 0 1px 3px rgba(22, 37, 68, 0.06);
 }
 
 .app-topbar-divider {
@@ -559,7 +560,7 @@ label.text-uppercase,
 .app-topbar-icon-btn:focus-visible {
   background: var(--brand-100);
   color: var(--brand-700);
-  box-shadow: 0 2px 8px rgba(38, 30, 62, 0.12);
+  box-shadow: 0 2px 8px rgba(22, 37, 68, 0.12);
   transform: translateY(-1px);
 }
 
@@ -918,7 +919,7 @@ label.text-uppercase,
 .dashboard-quick-card:focus-visible {
   transform: translateY(-2px);
   border-color: var(--brand-300);
-  box-shadow: 0 6px 16px rgba(38, 30, 62, 0.1) !important;
+  box-shadow: 0 6px 16px rgba(22, 37, 68, 0.1) !important;
 }
 
 .dashboard-quick-icon {

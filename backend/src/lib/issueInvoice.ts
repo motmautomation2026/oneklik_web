@@ -314,8 +314,8 @@ export function invoiceToReceiptModel(invoice: InvoiceRow, buyerEmail?: string |
     description,
     amount_paid_label: moneyLabel,
     payment_method: paymentMethodLabel(snap),
-    seller_name: invoice.seller_snapshot?.legal_name ?? "One-Klik",
-    seller_support_email: invoice.seller_snapshot?.billing_email ?? "support@oneklik.demo",
+    seller_name: invoice.seller_snapshot?.legal_name ?? "Quick ICP",
+    seller_support_email: invoice.seller_snapshot?.billing_email ?? "support@quickicp.demo",
   };
 }
 

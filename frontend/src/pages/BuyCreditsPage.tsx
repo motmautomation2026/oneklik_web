@@ -56,7 +56,7 @@ declare global {
 }
 
 const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
-const SALES_EMAIL = "sales@quickicp.com";
+const SALES_EMAIL = "quickicp@gmail.com";
 
 const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
   starter: { label: "Starter", bestFor: "Individual users" },
@@ -409,7 +409,7 @@ export default function BuyCreditsPage() {
                             ) : subscription ? (
                               subscription.plan_id === pack.id ? "Renew plan" : "Switch & pay"
                             ) : (
-                              "Subscribe"
+                              `Get ${info?.label ?? "started"}`
                             )}
                           </Button>
                         </>

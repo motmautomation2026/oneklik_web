@@ -30,7 +30,7 @@ const HARDCODED_SELLER: SellerSnapshot = {
   state_name: "Maharashtra",
   postal_code: "412207",
   country: "IN",
-  billing_email: "contact@quickicp.com",
+  billing_email: "quickicp@gmail.com",
   phone: null,
   pan: "AWYPK0264G",
 };

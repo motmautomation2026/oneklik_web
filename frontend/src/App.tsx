@@ -12,6 +12,7 @@ import DashboardPage from "./pages/DashboardPage";
 import CompanySearchPage from "./pages/CompanySearchPage";
 import PeopleSearchPage from "./pages/PeopleSearchPage";
 import LinkedInLookupPage from "./pages/LinkedInLookupPage";
+import EmailTemplatesPage from "./pages/EmailTemplatesPage";
 import ListsPage from "./pages/ListsPage";
 import ListDetailPage from "./pages/ListDetailPage";
 import BuyCreditsPage from "./pages/BuyCreditsPage";
@@ -84,6 +85,14 @@ function App() {
             element={
               <RequireAuth requireOnboarded>
                 <LinkedInLookupPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/email-templates"
+            element={
+              <RequireAuth requireOnboarded>
+                <EmailTemplatesPage />
               </RequireAuth>
             }
           />

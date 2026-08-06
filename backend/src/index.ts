@@ -22,6 +22,7 @@ import billingTickRouter from "./routes/billingTick.js";
 import billingSubscriptionRouter from "./routes/billingSubscription.js";
 import supportRouter from "./support/routes.js";
 import adminRouter from "./admin/routes.js";
+import emailTemplatesRouter from "./routes/emailTemplates.js";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const app = express();
@@ -49,6 +50,7 @@ app.use("/api", phoneRevealRouter);
 app.use("/api", listEmailRevealRouter);
 app.use("/api", listPhoneRevealRouter);
 app.use("/api", linkedinLookupRouter);
+app.use("/api", emailTemplatesRouter);
 app.use("/api", prospeoSuggestionsRouter);
 app.use("/api", mergeListsRouter);
 app.use("/api", paymentsCheckoutRouter);

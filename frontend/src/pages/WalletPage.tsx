@@ -42,6 +42,7 @@ const RUN_TYPE_LABELS: Record<string, string> = {
   people_search: "People search",
   email_enrich: "Email reveal",
   mobile_enrich: "Mobile reveal",
+  email_template: "Email template",
 };
 
 function directionOf(row: LedgerRow): Direction {

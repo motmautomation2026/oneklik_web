@@ -9,12 +9,24 @@ interface TagInputProps {
   // Optional — when provided, shows a live suggestions dropdown as the user
   // types (debounced). Every other usage of this component is unaffected.
   fetchSuggestions?: (query: string) => Promise<string[]>;
+  // Optional — applied to every value right before it's committed (Enter,
+  // blur, paste, or a clicked suggestion), so e.g. domain input can be
+  // cleaned up to a bare registrable domain regardless of how it was
+  // entered. Every other usage of this component is unaffected.
+  normalize?: (value: string) => string;
 }
 
 const SUGGESTION_MIN_CHARS = 2;
 const SUGGESTION_DEBOUNCE_MS = 300;
 
-export default function TagInput({ label, values, onChange, placeholder, fetchSuggestions }: TagInputProps) {
+export default function TagInput({
+  label,
+  values,
+  onChange,
+  placeholder,
+  fetchSuggestions,
+  normalize,
+}: TagInputProps) {
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
@@ -54,7 +66,7 @@ export default function TagInput({ label, values, onChange, placeholder, fetchSu
   }, [input, fetchSuggestions]);
 
   function addValue(value: string) {
-    const trimmed = value.trim();
+    const trimmed = normalize ? normalize(value) : value.trim();
     if (trimmed && !values.includes(trimmed)) {
       onChange([...values, trimmed]);
     }
@@ -79,7 +91,7 @@ export default function TagInput({ label, values, onChange, placeholder, fetchSu
     const text = e.clipboardData.getData("text");
     const parts = text
       .split(/[\n,]+/)
-      .map((s) => s.trim())
+      .map((s) => (normalize ? normalize(s) : s.trim()))
       .filter(Boolean);
 
     if (parts.length > 1) {

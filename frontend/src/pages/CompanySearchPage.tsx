@@ -23,6 +23,7 @@ import { apiPost } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
 import { normalizeDomain } from "../lib/domain";
 import { useAuth } from "../lib/AuthProvider";
+import { useSessionStorageState } from "../lib/useSessionStorageState";
 
 const SIZE_OPTIONS = [
   "1-10",
@@ -96,16 +97,16 @@ export default function CompanySearchPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [industries, setIndustries] = useState<string[]>([]);
-  const [locations, setLocations] = useState<string[]>(["India"]);
-  const [sizes, setSizes] = useState<string[]>([]);
-  const [companyCount, setCompanyCount] = useState(10);
+  const [industries, setIndustries] = useSessionStorageState<string[]>("companySearch.industries", []);
+  const [locations, setLocations] = useSessionStorageState<string[]>("companySearch.locations", ["India"]);
+  const [sizes, setSizes] = useSessionStorageState<string[]>("companySearch.sizes", []);
+  const [companyCount, setCompanyCount] = useSessionStorageState("companySearch.companyCount", 10);
 
-  const [aiMode, setAiMode] = useState(false);
-  const [sentence, setSentence] = useState("");
+  const [aiMode, setAiMode] = useSessionStorageState("companySearch.aiMode", false);
+  const [sentence, setSentence] = useSessionStorageState("companySearch.sentence", "");
 
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [companies, setCompanies] = useSessionStorageState<Company[]>("companySearch.companies", []);
+  const [hasSearched, setHasSearched] = useSessionStorageState("companySearch.hasSearched", false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -118,6 +119,15 @@ export default function CompanySearchPage() {
   const [saved, setSaved] = useState(false);
 
   const canSearch = industries.length > 0 || locations.length > 0;
+
+  function handleClearFilters() {
+    setIndustries([]);
+    setLocations(["India"]);
+    setSizes([]);
+    setCompanyCount(10);
+    setSentence("");
+    setError(null);
+  }
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -252,16 +262,21 @@ export default function CompanySearchPage() {
               <Card.Body>
                 <div className="d-flex justify-content-between align-items-center mb-3">
                   <span className="fw-semibold small text-uppercase text-primary">Filters</span>
-                  <Button
-                    size="sm"
-                    variant={aiMode ? "primary" : "outline-primary"}
-                    onClick={() => {
-                      setAiMode((v) => !v);
-                      setError(null);
-                    }}
-                  >
-                    AI Mode
-                  </Button>
+                  <div className="d-flex align-items-center gap-2">
+                    <Button size="sm" variant="outline-secondary" onClick={handleClearFilters}>
+                      Clear
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={aiMode ? "primary" : "outline-primary"}
+                      onClick={() => {
+                        setAiMode((v) => !v);
+                        setError(null);
+                      }}
+                    >
+                      AI Mode
+                    </Button>
+                  </div>
                 </div>
 
                 {aiMode ? (

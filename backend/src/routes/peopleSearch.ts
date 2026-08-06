@@ -18,6 +18,19 @@ interface PeopleSearchBody {
   count_per_company?: number;
 }
 
+// n8n sometimes answers with a validation complaint instead of person rows —
+// e.g. [{"message": "Subdomains are not supported: parry.murugappa.com"}].
+// Fed through normalizePerson this yields an empty FULL NAME and gets
+// silently filtered out, leaving the user with a bare "no results" and no
+// idea their input (not the search) was the problem. Detected up front so
+// the actual correction hint reaches the user instead of being discarded.
+function extractProviderMessage(rows: unknown[]): string | null {
+  const messages = rows
+    .map((row) => (row && typeof row === "object" ? (row as Record<string, unknown>).message : undefined))
+    .filter((m): m is string => typeof m === "string" && m.trim().length > 0);
+  return messages.length > 0 ? messages.join("; ") : null;
+}
+
 router.post("/hv/people-search", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const webhookUrl = process.env["get-people_webhook"];
   if (!webhookUrl) {
@@ -78,6 +91,7 @@ router.post("/hv/people-search", requireAuth, enforceAccountStatus(), async (req
 
   let people: Person[] = [];
   let n8nFailed = false;
+  let providerMessage: string | null = null;
 
   try {
     const payload = { domains, job_titles: jobTitles, locations, count_per_company: countPerCompany };
@@ -104,6 +118,7 @@ router.post("/hv/people-search", requireAuth, enforceAccountStatus(), async (req
           : Array.isArray((data as Record<string, unknown>)?.data)
             ? ((data as Record<string, unknown>).data as unknown[])
             : [];
+      providerMessage = extractProviderMessage(rows);
       people = rows
         .map((row) => normalizePerson(row as Record<string, unknown>))
         .filter((p) => p["FULL NAME"].length > 0)
@@ -126,6 +141,12 @@ router.post("/hv/people-search", requireAuth, enforceAccountStatus(), async (req
 
   if (n8nFailed) {
     return res.status(502).json({ error: "People search provider failed, credits released" });
+  }
+
+  // Not billed (delivered_count is 0), but this is a correction the user can
+  // actually act on — surface it instead of a bare "no results".
+  if (providerMessage && people.length === 0) {
+    return res.status(400).json({ error: providerMessage });
   }
 
   return res.json({ people });

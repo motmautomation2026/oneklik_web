@@ -6,6 +6,7 @@ import TagInput from "../components/TagInput";
 import { apiPost } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
+import { useSessionStorageState } from "../lib/useSessionStorageState";
 
 interface Person {
   "FULL NAME": string;
@@ -29,10 +30,10 @@ interface Person {
 export default function LinkedInLookupPage() {
   const { user } = useAuth();
 
-  const [urls, setUrls] = useState<string[]>([]);
+  const [urls, setUrls] = useSessionStorageState<string[]>("linkedinLookup.urls", []);
 
-  const [people, setPeople] = useState<Person[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [people, setPeople] = useSessionStorageState<Person[]>("linkedinLookup.people", []);
+  const [hasSearched, setHasSearched] = useSessionStorageState("linkedinLookup.hasSearched", false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -44,6 +45,11 @@ export default function LinkedInLookupPage() {
   const [saved, setSaved] = useState(false);
 
   const canSearch = urls.length > 0;
+
+  function handleClearFilters() {
+    setUrls([]);
+    setError(null);
+  }
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -132,6 +138,12 @@ export default function LinkedInLookupPage() {
           <Col xs={12} lg={3}>
             <Card className="shadow-sm border-primary-subtle filter-panel">
               <Card.Body>
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <span className="fw-semibold small text-uppercase text-primary">Filters</span>
+                  <Button size="sm" variant="outline-secondary" onClick={handleClearFilters}>
+                    Clear
+                  </Button>
+                </div>
                 <Form onSubmit={handleSearch}>
                   <TagInput
                     label="LinkedIn URLs"

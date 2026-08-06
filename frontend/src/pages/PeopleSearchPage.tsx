@@ -23,6 +23,8 @@ import ClampedNumberInput from "../components/ClampedNumberInput";
 import { apiPost } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../lib/AuthProvider";
+import { normalizeDomain } from "../lib/domain";
+import { useSessionStorageState } from "../lib/useSessionStorageState";
 
 interface Person {
   "FULL NAME": string;
@@ -60,16 +62,16 @@ export default function PeopleSearchPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [domains, setDomains] = useState<string[]>([]);
-  const [jobTitles, setJobTitles] = useState<string[]>([]);
-  const [locations, setLocations] = useState<string[]>([]);
-  const [countPerCompany, setCountPerCompany] = useState(10);
+  const [domains, setDomains] = useSessionStorageState<string[]>("peopleSearch.domains", []);
+  const [jobTitles, setJobTitles] = useSessionStorageState<string[]>("peopleSearch.jobTitles", []);
+  const [locations, setLocations] = useSessionStorageState<string[]>("peopleSearch.locations", []);
+  const [countPerCompany, setCountPerCompany] = useSessionStorageState("peopleSearch.countPerCompany", 10);
 
-  const [aiMode, setAiMode] = useState(false);
-  const [sentence, setSentence] = useState("");
+  const [aiMode, setAiMode] = useSessionStorageState("peopleSearch.aiMode", false);
+  const [sentence, setSentence] = useSessionStorageState("peopleSearch.sentence", "");
 
-  const [people, setPeople] = useState<Person[]>([]);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [people, setPeople] = useSessionStorageState<Person[]>("peopleSearch.people", []);
+  const [hasSearched, setHasSearched] = useSessionStorageState("peopleSearch.hasSearched", false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,6 +109,15 @@ export default function PeopleSearchPage() {
 
   const canSearch = domains.length > 0;
   const maxTotal = Math.min(domains.length * countPerCompany, 200);
+
+  function handleClearFilters() {
+    setDomains([]);
+    setJobTitles([]);
+    setLocations([]);
+    setCountPerCompany(10);
+    setSentence("");
+    setError(null);
+  }
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -279,16 +290,21 @@ export default function PeopleSearchPage() {
               <Card.Body>
                 <div className="d-flex justify-content-between align-items-center mb-3">
                   <span className="fw-semibold small text-uppercase text-primary">Filters</span>
-                  <Button
-                    size="sm"
-                    variant={aiMode ? "primary" : "outline-primary"}
-                    onClick={() => {
-                      setAiMode((v) => !v);
-                      setError(null);
-                    }}
-                  >
-                    AI Mode
-                  </Button>
+                  <div className="d-flex align-items-center gap-2">
+                    <Button size="sm" variant="outline-secondary" onClick={handleClearFilters}>
+                      Clear
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={aiMode ? "primary" : "outline-primary"}
+                      onClick={() => {
+                        setAiMode((v) => !v);
+                        setError(null);
+                      }}
+                    >
+                      AI Mode
+                    </Button>
+                  </div>
                 </div>
 
                 {aiMode ? (
@@ -327,6 +343,7 @@ export default function PeopleSearchPage() {
                       values={domains}
                       onChange={setDomains}
                       placeholder="e.g. zf.com, press Enter"
+                      normalize={normalizeDomain}
                     />
 
                     <TagInput

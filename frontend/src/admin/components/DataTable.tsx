@@ -14,13 +14,14 @@ interface DataTableProps<T> {
   rows: T[];
   getRowKey: (row: T) => string;
   emptyMessage?: string;
+  onRowClick?: (row: T) => void;
 }
 
 // Shared read-only table for payments / top-users / flagged-accounts — kept
 // generic so each admin table is just a column config, not a bespoke
 // component. Per the dataviz skill, a table view is always available
 // alongside charts rather than being the charts' only fallback.
-export default function DataTable<T>({ columns, rows, getRowKey, emptyMessage = "No data yet" }: DataTableProps<T>) {
+export default function DataTable<T>({ columns, rows, getRowKey, emptyMessage = "No data yet", onRowClick }: DataTableProps<T>) {
   if (rows.length === 0) {
     return (
       <div className="text-center py-4" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
@@ -38,7 +39,7 @@ export default function DataTable<T>({ columns, rows, getRowKey, emptyMessage = 
               <th
                 key={col.key}
                 className={col.align === "end" ? "text-end" : undefined}
-                style={{ color: ADMIN_CHART_COLORS.ink.muted, fontWeight: 500, fontSize: "0.8rem" }}
+                style={{ color: ADMIN_CHART_COLORS.ink.muted, fontWeight: 500, fontSize: "0.8rem", textTransform: "uppercase", letterSpacing: "0.04em" }}
               >
                 {col.header}
               </th>
@@ -47,7 +48,11 @@ export default function DataTable<T>({ columns, rows, getRowKey, emptyMessage = 
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={getRowKey(row)}>
+            <tr
+              key={getRowKey(row)}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              style={onRowClick ? { cursor: "pointer", transition: "background 0.15s ease" } : undefined}
+            >
               {columns.map((col) => (
                 <td key={col.key} className={col.align === "end" ? "text-end" : undefined}>
                   {col.render(row)}

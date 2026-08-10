@@ -2,6 +2,19 @@ import { useEffect, useState } from "react";
 import { Alert, Badge, Button, Form, Modal, Spinner } from "react-bootstrap";
 import { Link, useParams } from "react-router-dom";
 import {
+  ArrowLeft,
+  BoxArrowUpRight,
+  ChatLeftTextFill,
+  ClockFill,
+  JournalText,
+  PencilSquare,
+  PersonFill,
+  ReplyFill,
+  ShieldLockFill,
+  ThreeDotsVertical,
+  Paperclip,
+} from "react-bootstrap-icons";
+import {
   fetchAdmins,
   fetchSupportAttachmentUrl,
   fetchSupportTicket,
@@ -12,8 +25,7 @@ import {
   postSupportMessage,
   setSupportMute,
 } from "../api/adminApi";
-import SectionCard from "../components/SectionCard";
-import { ACCOUNT_STATUS_VARIANT, SUBSCRIPTION_STATUS_VARIANT, TICKET_PRIORITY_VARIANT, TICKET_STATUS_VARIANT } from "../badgeVariants";
+import { TICKET_PRIORITY_VARIANT, TICKET_STATUS_VARIANT } from "../badgeVariants";
 
 import { formatDateTime, formatNumber } from "../format";
 import { useAdminResource } from "../hooks/useAdminResource";
@@ -54,9 +66,32 @@ function AttachmentLink({ attachment }: { attachment: TicketAttachment }) {
   }
 
   return (
-    <Button variant="outline-secondary" size="sm" disabled={opening} onClick={open} className="me-2 mt-2">
+    <Button variant="outline-secondary" size="sm" disabled={opening} onClick={open} className="me-2 mt-2" style={{ borderRadius: 6, fontSize: "0.8rem" }}>
+      <Paperclip size={12} className="me-1" />
       {opening ? "Opening…" : `${attachment.filename} (${formatBytes(attachment.size_bytes)})`}
     </Button>
+  );
+}
+
+// Avatar initial circle used in conversations and the requester bar.
+function AvatarInitial({ letter, color, size = 32 }: { letter: string; color: string; size?: number }) {
+  return (
+    <div
+      className="d-flex align-items-center justify-content-center flex-shrink-0"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: `${color}15`,
+        color,
+        fontSize: size * 0.4,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: 0,
+      }}
+    >
+      {letter}
+    </div>
   );
 }
 
@@ -67,46 +102,89 @@ function Message({ message }: { message: AdminTicketMessage }) {
   // Internal notes get their own visual language — amber, dashed, explicitly
   // labelled. An agent skimming a thread must never have to read carefully to
   // tell what the customer can see.
-  const background = internal ? "#fff8e1" : fromUs ? ADMIN_CHART_COLORS.surface : "#f6f5fb";
-  const border = internal ? "#e0a800" : ADMIN_CHART_COLORS.grid;
+  const background = internal ? "#fffbeb" : fromUs ? "#f8fafc" : ADMIN_CHART_COLORS.surface;
+  const border = internal ? "#e0a800" : "#e8e8e4";
+  const avatarColor = internal
+    ? "#b8860b"
+    : fromUs
+      ? ADMIN_CHART_COLORS.categorical.blue
+      : ADMIN_CHART_COLORS.categorical.aqua;
+  const avatarLetter = internal
+    ? "N"
+    : (message.author_email?.[0] ?? (fromUs ? "A" : "C"));
+  const roleLabel = internal
+    ? "Internal"
+    : fromUs
+      ? "You"
+      : "Customer";
 
   return (
     <div
-      className="rounded-3 p-3 mb-3"
-      style={{
-        background,
-        border: `1px ${internal ? "dashed" : "solid"} ${border}`,
-        marginLeft: fromUs ? 32 : 0,
-        marginRight: fromUs ? 0 : 32,
-      }}
+      className="d-flex gap-3 mb-4"
+      style={{ marginLeft: fromUs && !internal ? 16 : 0 }}
     >
-      <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
-        {internal && (
-          <Badge bg="warning" text="dark">
-            Internal note — not visible to customer
-          </Badge>
-        )}
-        <span className="small fw-semibold" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-          {message.author_role === "system" ? "System" : message.author_email ?? (fromUs ? "Support" : "Customer")}
-        </span>
-        <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-          {formatDateTime(message.created_at)}
-        </span>
-      </div>
-      {/* Plain text, pre-wrap. Never dangerouslySetInnerHTML — this is
-          user-supplied content. */}
-      <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: ADMIN_CHART_COLORS.ink.primary }}>
-        {message.body}
-      </div>
-      {message.attachments.length > 0 && (
-        <div>
-          {message.attachments.map((a) => (
-            <AttachmentLink key={a.id} attachment={a} />
-          ))}
+      <AvatarInitial letter={avatarLetter} color={avatarColor} size={36} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
+          <span className="fw-semibold small" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+            {message.author_role === "system"
+              ? "System"
+              : message.author_email ?? (fromUs ? "Support" : "Customer")}
+          </span>
+          <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+            {formatDateTime(message.created_at)}
+          </span>
+          {internal && (
+            <span className="small" style={{ color: "#8a6d00", fontStyle: "italic" }}>
+              · Visible to admins only
+            </span>
+          )}
+          <span
+            className="small ms-auto"
+            style={{
+              color: internal ? "#8a6d00" : fromUs ? ADMIN_CHART_COLORS.categorical.blue : ADMIN_CHART_COLORS.ink.muted,
+              fontWeight: 500,
+            }}
+          >
+            {roleLabel}
+          </span>
         </div>
-      )}
+        <div
+          className="rounded-3 p-3"
+          style={{
+            background,
+            border: `1px ${internal ? "dashed" : "solid"} ${border}`,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            color: ADMIN_CHART_COLORS.ink.primary,
+            fontSize: "0.9rem",
+            lineHeight: 1.6,
+          }}
+        >
+          {message.body}
+          {message.attachments.length > 0 && (
+            <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${border}` }}>
+              {message.attachments.map((a) => (
+                <AttachmentLink key={a.id} attachment={a} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
+}
+
+// Event type → icon + color for the activity timeline
+function eventVisual(eventType: string): { icon: typeof ChatLeftTextFill; color: string } {
+  if (eventType.includes("created")) return { icon: ChatLeftTextFill, color: ADMIN_CHART_COLORS.categorical.blue };
+  if (eventType.includes("note") || eventType.includes("internal")) return { icon: JournalText, color: "#b8860b" };
+  if (eventType.includes("reply") || eventType.includes("message")) return { icon: ReplyFill, color: ADMIN_CHART_COLORS.categorical.aqua };
+  if (eventType.includes("status")) return { icon: PencilSquare, color: ADMIN_CHART_COLORS.categorical.orange };
+  if (eventType.includes("assign")) return { icon: PersonFill, color: ADMIN_CHART_COLORS.categorical.magenta };
+  if (eventType.includes("priority")) return { icon: ShieldLockFill, color: ADMIN_CHART_COLORS.status.warning };
+  if (eventType.includes("close") || eventType.includes("resolve")) return { icon: ClockFill, color: ADMIN_CHART_COLORS.categorical.green };
+  return { icon: PencilSquare, color: ADMIN_CHART_COLORS.ink.muted };
 }
 
 export default function AdminSupportDetailPage() {
@@ -253,34 +331,54 @@ export default function AdminSupportDetailPage() {
 
   return (
     <>
+      {/* ── Back link ──────────────────────────────────────────────────── */}
       <div className="mb-3">
-        <Link to="/admin/support" className="small">
-          ← Back to queue
+        <Link
+          to="/admin/support"
+          className="d-inline-flex align-items-center gap-1 small fw-medium"
+          style={{ color: ADMIN_CHART_COLORS.categorical.blue, textDecoration: "none" }}
+        >
+          <ArrowLeft size={14} />
+          Back to inbox
         </Link>
       </div>
 
-      <div className="d-flex align-items-start justify-content-between gap-3 mb-4 flex-wrap">
+      {/* ── Ticket header ──────────────────────────────────────────────── */}
+      <div className="d-flex align-items-start justify-content-between gap-3 mb-3 flex-wrap">
         <div style={{ minWidth: 0 }}>
-          <h1 className="h4 mb-1" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-            {ticket.subject}
-          </h1>
+          <div className="d-flex align-items-center gap-2 flex-wrap mb-1">
+            <h1 className="h4 mb-0 fw-bold" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+              #{ticket.ticket_number}&ensp;{ticket.subject}
+            </h1>
+            <Badge
+              bg={TICKET_STATUS_VARIANT[ticket.status] ?? "secondary"}
+              style={{ fontSize: "0.75rem", fontWeight: 500, padding: "4px 10px", borderRadius: 4 }}
+            >
+              {TICKET_STATUS_LABEL[ticket.status]}
+            </Badge>
+            <Badge
+              bg={TICKET_PRIORITY_VARIANT[ticket.priority] ?? "secondary"}
+              style={{ fontSize: "0.75rem", fontWeight: 500, padding: "4px 10px", borderRadius: 4 }}
+            >
+              {ticket.priority}
+            </Badge>
+          </div>
           <div className="d-flex align-items-center gap-2 flex-wrap small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-            <span>#{ticket.ticket_number}</span>
-            <span>·</span>
             <span>{TICKET_CATEGORY_LABEL[ticket.category]}</span>
             <span>·</span>
-            <span>Raised {formatDateTime(ticket.created_at)}</span>
+            <span>Created {formatDateTime(ticket.created_at)}</span>
+            <span>·</span>
+            <span>Via {ticket.source === "lockout" ? "Account lockout" : ticket.source === "app" ? "App" : "Admin"}</span>
             {ticket.source === "lockout" && (
-              <Badge bg="warning" text="dark" title="Raised from the account lockout screen">
+              <Badge bg="warning" text="dark" title="Raised from the account lockout screen" style={{ fontSize: "0.65rem" }}>
                 Appeal
               </Badge>
             )}
           </div>
         </div>
-        <div className="d-flex align-items-center gap-2">
-          <Badge bg={TICKET_STATUS_VARIANT[ticket.status] ?? "secondary"}>{TICKET_STATUS_LABEL[ticket.status]}</Badge>
-          <Badge bg={TICKET_PRIORITY_VARIANT[ticket.priority] ?? "secondary"}>{ticket.priority}</Badge>
-        </div>
+        <Button variant="outline-secondary" size="sm" style={{ borderRadius: 8 }} title="More actions">
+          <ThreeDotsVertical size={16} />
+        </Button>
       </div>
 
       {actionError && (
@@ -289,9 +387,87 @@ export default function AdminSupportDetailPage() {
         </Alert>
       )}
 
+      {/* ── Requester profile bar ──────────────────────────────────────── */}
+      <div
+        className="rounded-3 border p-3 mb-4 d-flex align-items-center gap-3 flex-wrap"
+        style={{ background: ADMIN_CHART_COLORS.surface, borderColor: ADMIN_CHART_COLORS.grid }}
+      >
+        <AvatarInitial
+          letter={(ticket.email ?? "U")[0]}
+          color={ADMIN_CHART_COLORS.categorical.blue}
+          size={40}
+        />
+        <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+          <div className="d-flex align-items-center gap-2 flex-wrap">
+            <Link
+              to={`/admin/users/${ticket.user_id}`}
+              className="fw-semibold"
+              style={{ color: ADMIN_CHART_COLORS.ink.primary, textDecoration: "none", fontSize: "0.95rem" }}
+            >
+              {ticket.email ?? ticket.user_id}
+            </Link>
+            {ticket.requester.company && (
+              <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                {ticket.requester.company}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="d-flex align-items-center gap-4 flex-wrap small">
+          <div className="text-center">
+            <div className="d-flex align-items-center gap-1 justify-content-center">
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: ticket.requester.account_status === "active" ? ADMIN_CHART_COLORS.status.good : ADMIN_CHART_COLORS.status.warning,
+                  flexShrink: 0,
+                }}
+              />
+              <span className="fw-medium" style={{ textTransform: "capitalize" }}>{ticket.requester.account_status}</span>
+            </div>
+            <div style={{ color: ADMIN_CHART_COLORS.ink.muted, fontSize: "0.75rem" }}>Account status</div>
+          </div>
+          <div className="text-center">
+            <div className="fw-medium">{formatNumber(ticket.requester.available_balance)}</div>
+            <div style={{ color: ADMIN_CHART_COLORS.ink.muted, fontSize: "0.75rem" }}>Credits balance</div>
+          </div>
+          <div className="text-center">
+            <div className="fw-medium">
+              {ticket.requester.subscription
+                ? (ticket.requester.subscription.plan_name ?? ticket.requester.subscription.plan_id)
+                : "No subscription"}
+            </div>
+            <div style={{ color: ADMIN_CHART_COLORS.ink.muted, fontSize: "0.75rem" }}>Plan</div>
+          </div>
+        </div>
+        <Link
+          to={`/admin/users/${ticket.user_id}`}
+          className="d-flex align-items-center gap-1 small fw-medium"
+          style={{ color: ADMIN_CHART_COLORS.categorical.blue, textDecoration: "none", whiteSpace: "nowrap", borderRadius: 8, border: `1px solid ${ADMIN_CHART_COLORS.grid}`, padding: "6px 12px" }}
+        >
+          View full profile
+          <BoxArrowUpRight size={12} />
+        </Link>
+      </div>
+
       <div className="row g-3">
+        {/* ── Conversation ────────────────────────────────────────────────── */}
         <div className="col-12 col-lg-8">
-          <SectionCard title="Conversation" loading={false} error={null}>
+          <div
+            className="rounded-3 border p-3 h-100"
+            style={{ background: ADMIN_CHART_COLORS.surface, borderColor: ADMIN_CHART_COLORS.grid }}
+          >
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <h2 className="h6 mb-0 fw-semibold" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+                Conversation
+              </h2>
+              <Button variant="link" size="sm" className="d-flex align-items-center gap-1 p-0" style={{ color: ADMIN_CHART_COLORS.ink.muted, textDecoration: "none", fontSize: "0.8rem" }}>
+                Oldest first ↓
+              </Button>
+            </div>
+
             {messagesHasMore && (
               <div className="text-center mb-3">
                 <Button
@@ -299,6 +475,7 @@ export default function AdminSupportDetailPage() {
                   variant="outline-secondary"
                   disabled={loadingOlderMessages}
                   onClick={loadOlderMessages}
+                  style={{ borderRadius: 8 }}
                 >
                   {loadingOlderMessages
                     ? "Loading…"
@@ -306,6 +483,7 @@ export default function AdminSupportDetailPage() {
                 </Button>
               </div>
             )}
+
             {messages.map((m) => (
               <Message key={m.id} message={m} />
             ))}
@@ -315,35 +493,54 @@ export default function AdminSupportDetailPage() {
               </div>
             )}
 
-            {/* The composer's own chrome changes with the mode. A checkbox
-                alone is too easy to miss; sending an internal note to a
-                customer is the one mistake in this console that cannot be
-                taken back. */}
+            {/* ── Reply composer ────────────────────────────────────────────── */}
             <div
               className="rounded-3 p-3 mt-3"
               style={{
-                background: internal ? "#fff8e1" : ADMIN_CHART_COLORS.surface,
+                background: internal ? "#fffbeb" : "#f8fafc",
                 border: `1px ${internal ? "dashed #e0a800" : `solid ${ADMIN_CHART_COLORS.grid}`}`,
               }}
             >
-              <div className="d-flex gap-2 mb-2">
-                <Button
-                  size="sm"
-                  variant={internal ? "outline-secondary" : "primary"}
-                  onClick={() => setInternal(false)}
+              {/* Composer tabs */}
+              <div className="d-flex gap-0 mb-3" style={{ borderBottom: `1px solid ${ADMIN_CHART_COLORS.grid}` }}>
+                <button
                   type="button"
+                  onClick={() => setInternal(false)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: !internal ? `2px solid ${ADMIN_CHART_COLORS.categorical.blue}` : "2px solid transparent",
+                    padding: "6px 14px",
+                    cursor: "pointer",
+                    color: !internal ? ADMIN_CHART_COLORS.categorical.blue : ADMIN_CHART_COLORS.ink.muted,
+                    fontWeight: !internal ? 600 : 400,
+                    fontSize: "0.85rem",
+                    transition: "all 0.15s ease",
+                    marginBottom: -1,
+                  }}
                 >
                   Reply to customer
-                </Button>
-                <Button
-                  size="sm"
-                  variant={internal ? "warning" : "outline-secondary"}
-                  onClick={() => setInternal(true)}
+                </button>
+                <button
                   type="button"
+                  onClick={() => setInternal(true)}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    borderBottom: internal ? "2px solid #b8860b" : "2px solid transparent",
+                    padding: "6px 14px",
+                    cursor: "pointer",
+                    color: internal ? "#8a6d00" : ADMIN_CHART_COLORS.ink.muted,
+                    fontWeight: internal ? 600 : 400,
+                    fontSize: "0.85rem",
+                    transition: "all 0.15s ease",
+                    marginBottom: -1,
+                  }}
                 >
                   Internal note
-                </Button>
+                </button>
               </div>
+
 
               <Form.Control
                 as="textarea"
@@ -351,194 +548,242 @@ export default function AdminSupportDetailPage() {
                 maxLength={5000}
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
-                placeholder={internal ? "Visible only to admins…" : "This will be sent to the customer…"}
+                placeholder={internal ? "Visible only to admins…" : "Type your reply…"}
+                style={{
+                  borderRadius: 8,
+                  borderColor: ADMIN_CHART_COLORS.grid,
+                  fontSize: "0.9rem",
+                  resize: "vertical",
+                }}
               />
 
-              <div className="d-flex align-items-center justify-content-between mt-2 gap-2">
-                <span className="small" style={{ color: internal ? "#8a6d00" : ADMIN_CHART_COLORS.ink.muted }}>
-                  {internal
-                    ? "Internal note — the customer will not see this."
-                    : ticket.status === "closed"
-                      ? "This ticket is closed; replying will not reopen it for the customer."
-                      : "The customer will see this reply."}
+              <div className="d-flex align-items-center justify-content-between mt-3 gap-2 flex-wrap">
+                <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                  Press <kbd style={{ fontSize: "0.75rem", padding: "1px 4px", borderRadius: 3, background: "#f0f0ee", border: `1px solid ${ADMIN_CHART_COLORS.grid}` }}>Cmd + Enter</kbd> to send
                 </span>
-                <Button
-                  size="sm"
-                  variant={internal ? "warning" : "primary"}
-                  disabled={sending || !reply.trim()}
-                  onClick={handleSend}
-                >
-                  {sending ? "Sending…" : internal ? "Save note" : "Send reply"}
-                </Button>
+                <div className="d-flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={!reply.trim()}
+                    onClick={() => setReply("")}
+                    style={{ borderRadius: 8, padding: "6px 16px" }}
+                  >
+                    Discard
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={internal ? "warning" : "success"}
+                    disabled={sending || !reply.trim()}
+                    onClick={handleSend}
+                    className="d-flex align-items-center gap-1"
+                    style={{ borderRadius: 8, padding: "6px 20px", fontWeight: 500 }}
+                  >
+                    {sending ? "Sending…" : internal ? "Save note" : "Send reply"}
+                  </Button>
+                </div>
               </div>
             </div>
-          </SectionCard>
+          </div>
         </div>
 
+        {/* ── Right sidebar ──────────────────────────────────────────────── */}
         <div className="col-12 col-lg-4">
+          {/* Ticket details card */}
           <div className="mb-3">
-            <SectionCard title="Requester" loading={false} error={null}>
-              <div className="small">
-                <div className="mb-2">
-                  <Link to={`/admin/users/${ticket.user_id}`}>{ticket.email ?? ticket.user_id}</Link>
-                </div>
-                {ticket.requester.company && (
-                  <div className="mb-2" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-                    {ticket.requester.company}
-                  </div>
-                )}
-                <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
-                  <Badge bg={ACCOUNT_STATUS_VARIANT[ticket.requester.account_status] ?? "secondary"}>
-                    {ticket.requester.account_status}
-                  </Badge>
-                  {ticket.account_status_at_submit !== ticket.requester.account_status && (
-                    <span style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                      was {ticket.account_status_at_submit} when raised
-                    </span>
-                  )}
-                </div>
-                {ticket.requester.status_reason && (
-                  <div className="mb-2" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-                    Restriction reason: {ticket.requester.status_reason}
-                  </div>
-                )}
-                <div className="mb-2">Balance: {formatNumber(ticket.requester.available_balance)} credits</div>
-                {ticket.requester.subscription ? (
-                  <div className="mb-2">
-                    <div className="d-flex align-items-center gap-2 flex-wrap mb-1">
-                      <Badge bg="primary">
-                        {ticket.requester.subscription.plan_name ?? ticket.requester.subscription.plan_id}
-                      </Badge>
-                      <Badge
-                        bg={
-                          SUBSCRIPTION_STATUS_VARIANT[ticket.requester.subscription.status] ?? "secondary"
-                        }
-                      >
-                        {ticket.requester.subscription.status}
-                      </Badge>
-                    </div>
-                    <div style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-                      Period ends {formatDateTime(ticket.requester.subscription.current_period_end)}
-                      <br />
-                      Buffer until {formatDateTime(ticket.requester.subscription.grace_ends_at)}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mb-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                    No subscription
-                  </div>
-                )}
-                <div className="mb-2">Other tickets: {formatNumber(ticket.requester.other_ticket_count)}</div>
+            <div
+              className="rounded-3 border p-3"
+              style={{ background: ADMIN_CHART_COLORS.surface, borderColor: ADMIN_CHART_COLORS.grid }}
+            >
+              <h2 className="h6 mb-3 fw-semibold" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+                Ticket details
+              </h2>
 
-                {ticket.requester.account_status !== "active" && (
-                  <Alert variant="warning" className="py-2 small mb-2">
-                    This account is {ticket.requester.account_status}. Resolve the appeal from the{" "}
-                    <Link to={`/admin/users/${ticket.user_id}`}>user page</Link>, then update this ticket.
-                  </Alert>
-                )}
+              {/* Editable fields */}
+              <div className="mb-3">
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary, minWidth: 80 }}>Status</span>
+                  <Form.Select
+                    size="sm"
+                    value={ticket.status}
+                    onChange={(e) => patch({ status: e.target.value as TicketStatus })}
+                    style={{ maxWidth: 160, borderRadius: 6, fontSize: "0.85rem", borderColor: ADMIN_CHART_COLORS.grid }}
+                  >
+                    {TICKET_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {TICKET_STATUS_LABEL[s]}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </div>
 
-                {muted && (
-                  <Alert variant="secondary" className="py-2 small mb-2">
-                    Support muted until {formatDateTime(ticket.requester.support_muted_until!)}.{" "}
-                    <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={() => handleMute(null)}>
-                      Lift mute
-                    </button>
-                  </Alert>
-                )}
-                {!muted && (
-                  <Button size="sm" variant="outline-secondary" onClick={() => setMuteOpen(true)}>
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary, minWidth: 80 }}>Priority</span>
+                  <Form.Select
+                    size="sm"
+                    value={ticket.priority}
+                    onChange={(e) => patch({ priority: e.target.value as TicketPriority })}
+                    style={{ maxWidth: 160, borderRadius: 6, fontSize: "0.85rem", borderColor: ADMIN_CHART_COLORS.grid }}
+                  >
+                    {TICKET_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </div>
+
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary, minWidth: 80 }}>Assignee</span>
+                  <Form.Select
+                    size="sm"
+                    value={ticket.assigned_to ?? ""}
+                    onChange={(e) => patch({ assigned_to: e.target.value || null })}
+                    style={{ maxWidth: 160, borderRadius: 6, fontSize: "0.85rem", borderColor: ADMIN_CHART_COLORS.grid }}
+                  >
+                    <option value="">Unassigned</option>
+                    {(admins.data ?? []).map((a) => (
+                      <option key={a.user_id} value={a.user_id}>
+                        {a.email ?? a.user_id}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </div>
+              </div>
+
+              {/* Read-only fields */}
+              <div style={{ borderTop: `1px solid ${ADMIN_CHART_COLORS.grid}`, paddingTop: 12 }}>
+                {[
+                  { label: "Category", value: TICKET_CATEGORY_LABEL[ticket.category] },
+                  { label: "Source", value: ticket.source === "lockout" ? "Account lockout" : ticket.source === "app" ? "App" : "Admin" },
+                  { label: "Ticket ID", value: `#${ticket.ticket_number}` },
+                ].map(({ label, value }) => (
+                  <div key={label} className="d-flex align-items-center justify-content-between mb-2">
+                    <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>{label}</span>
+                    <span className="small fw-medium" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>{value}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Requester alerts */}
+              {ticket.requester.account_status !== "active" && (
+                <Alert variant="warning" className="py-2 small mb-2 mt-2">
+                  This account is {ticket.requester.account_status}. Resolve the appeal from the{" "}
+                  <Link to={`/admin/users/${ticket.user_id}`}>user page</Link>, then update this ticket.
+                </Alert>
+              )}
+
+              {muted && (
+                <Alert variant="secondary" className="py-2 small mb-2 mt-2">
+                  Support muted until {formatDateTime(ticket.requester.support_muted_until!)}.{" "}
+                  <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={() => handleMute(null)}>
+                    Lift mute
+                  </button>
+                </Alert>
+              )}
+              {!muted && (
+                <div className="mt-2">
+                  <Button size="sm" variant="outline-secondary" onClick={() => setMuteOpen(true)} style={{ borderRadius: 6, fontSize: "0.8rem", width: "100%" }}>
                     Mute new messages…
                   </Button>
-                )}
-              </div>
-            </SectionCard>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="mb-3">
-            <SectionCard title="Manage" loading={false} error={null}>
-              <Form.Group className="mb-2">
-                <Form.Label className="small mb-1">Status</Form.Label>
-                <Form.Select
+          {/* ── Activity timeline ──────────────────────────────────────────── */}
+          <div
+            className="rounded-3 border p-3"
+            style={{ background: ADMIN_CHART_COLORS.surface, borderColor: ADMIN_CHART_COLORS.grid }}
+          >
+            <div className="d-flex align-items-center justify-content-between mb-3">
+              <h2 className="h6 mb-0 fw-semibold" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+                Activity timeline
+              </h2>
+              {eventsHasMore && (
+                <Button
                   size="sm"
-                  value={ticket.status}
-                  onChange={(e) => patch({ status: e.target.value as TicketStatus })}
+                  variant="link"
+                  disabled={loadingOlderEvents}
+                  onClick={loadOlderEvents}
+                  className="p-0"
+                  style={{ fontSize: "0.8rem", textDecoration: "none" }}
                 >
-                  {TICKET_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {TICKET_STATUS_LABEL[s]}
-                    </option>
-                  ))}
-                </Form.Select>
-              </Form.Group>
-
-              <Form.Group className="mb-2">
-                <Form.Label className="small mb-1">Priority</Form.Label>
-                <Form.Select
-                  size="sm"
-                  value={ticket.priority}
-                  onChange={(e) => patch({ priority: e.target.value as TicketPriority })}
-                >
-                  {TICKET_PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </Form.Select>
-              </Form.Group>
-
-              <Form.Group>
-                <Form.Label className="small mb-1">Assignee</Form.Label>
-                <Form.Select
-                  size="sm"
-                  value={ticket.assigned_to ?? ""}
-                  onChange={(e) => patch({ assigned_to: e.target.value || null })}
-                >
-                  <option value="">Unassigned</option>
-                  {(admins.data ?? []).map((a) => (
-                    <option key={a.user_id} value={a.user_id}>
-                      {a.email ?? a.user_id}
-                    </option>
-                  ))}
-                </Form.Select>
-              </Form.Group>
-            </SectionCard>
-          </div>
-
-          <SectionCard title={`History (${ticket.events_total})`} loading={false} error={null}>
-            {eventsHasMore && (
-              <div className="mb-2">
-                <Button size="sm" variant="outline-secondary" disabled={loadingOlderEvents} onClick={loadOlderEvents}>
-                  {loadingOlderEvents
-                    ? "Loading…"
-                    : `Load older (${ticket.events_total - events.length} more)`}
+                  {loadingOlderEvents ? "Loading…" : "View all"}
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
+
             {events.length === 0 ? (
               <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
                 Nothing yet.
               </div>
             ) : (
-              <ul className="list-unstyled mb-0 small">
-                {events.map((e) => (
-                  <li key={e.id} className="mb-2">
-                    <div style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-                      {e.event_type.replace(/_/g, " ")}
-                      {e.from_value || e.to_value ? `: ${e.from_value ?? "—"} → ${e.to_value ?? "—"}` : ""}
+              <div style={{ position: "relative" }}>
+                {events.map((e, i) => {
+                  const { icon: Icon, color } = eventVisual(e.event_type);
+                  const isLast = i === events.length - 1;
+                  return (
+                    <div
+                      key={e.id}
+                      className="d-flex gap-3"
+                      style={{ paddingBottom: isLast ? 0 : 16, position: "relative" }}
+                    >
+                      {/* Timeline line + dot */}
+                      <div className="d-flex flex-column align-items-center" style={{ width: 28, flexShrink: 0 }}>
+                        <div
+                          className="d-flex align-items-center justify-content-center rounded-circle flex-shrink-0"
+                          style={{
+                            width: 28,
+                            height: 28,
+                            background: `${color}15`,
+                            color,
+                            zIndex: 1,
+                          }}
+                        >
+                          <Icon size={13} />
+                        </div>
+                        {!isLast && (
+                          <div
+                            style={{
+                              width: 2,
+                              flex: 1,
+                              background: ADMIN_CHART_COLORS.grid,
+                              marginTop: 4,
+                            }}
+                          />
+                        )}
+                      </div>
+                      {/* Event content */}
+                      <div style={{ paddingTop: 3, minWidth: 0 }}>
+                        <div className="small fw-semibold" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+                          {e.event_type.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())}
+                        </div>
+                        {(e.from_value || e.to_value) && (
+                          <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+                            {e.from_value ?? "—"} → {e.to_value ?? "—"}
+                          </div>
+                        )}
+                        {e.note && (
+                          <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+                            {e.note}
+                          </div>
+                        )}
+                        <div style={{ fontSize: "0.7rem", color: ADMIN_CHART_COLORS.ink.muted }}>
+                          {formatDateTime(e.created_at)}
+                          {e.actor_email ? ` · ${e.actor_email}` : ` · ${e.actor_role}`}
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                      {formatDateTime(e.created_at)}
-                      {e.actor_email ? ` · ${e.actor_email}` : ` · ${e.actor_role}`}
-                    </div>
-                    {e.note && <div style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>{e.note}</div>}
-                  </li>
-                ))}
-              </ul>
+                  );
+                })}
+              </div>
             )}
-          </SectionCard>
+          </div>
         </div>
       </div>
 
+      {/* ── Mute modal (unchanged) ───────────────────────────────────────── */}
       <Modal show={muteOpen} onHide={() => setMuteOpen(false)} centered>
         <Modal.Header closeButton>
           <Modal.Title className="h6">Mute new support messages</Modal.Title>

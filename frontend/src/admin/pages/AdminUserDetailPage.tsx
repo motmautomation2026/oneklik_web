@@ -20,7 +20,7 @@ import {
 import DataTable from "../components/DataTable";
 import CreditGrantPanel from "../components/CreditGrantPanel";
 import KpiTile from "../components/KpiTile";
-import ModerationPanel from "../components/ModerationPanel";
+import ModerationPanel, { ModerationHistoryCard } from "../components/ModerationPanel";
 import PaginationBar from "../components/PaginationBar";
 import SectionCard from "../components/SectionCard";
 import { formatDateTime, formatInrFromMinorUnits, formatNumber } from "../format";
@@ -31,10 +31,20 @@ import type { AdminInvoiceRow, LedgerEntry, PaymentRow } from "../types";
 const LEDGER_PAGE_SIZE = 25;
 const MODERATION_PAGE_SIZE = 25;
 
+type TabKey = "account" | "billing" | "credits" | "lists";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "account", label: "Account" },
+  { key: "billing", label: "Billing" },
+  { key: "credits", label: "Credits & usage" },
+  { key: "lists", label: "Lists" },
+];
+
 export default function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const userId = id ?? "";
   const [refetchKey, setRefetchKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<TabKey>("account");
   const [ledgerPage, setLedgerPage] = useState(1);
   const [moderationPage, setModerationPage] = useState(1);
   const [reviewingFlagId, setReviewingFlagId] = useState<string | null>(null);
@@ -255,28 +265,47 @@ export default function AdminUserDetailPage() {
         &larr; Back to Users
       </Link>
 
-      <div className="mb-4">
-        <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
-          <h1 className="h4 mb-0" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-            {user.email ?? user.user_id}
-          </h1>
-          {user.account_status !== "active" && (
+      <div className="mb-4 d-flex align-items-start justify-content-between gap-3 flex-wrap">
+        <div>
+          <div className="d-flex align-items-center gap-2 mb-1 flex-wrap">
+            <h1 className="h4 mb-0" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
+              {user.email ?? user.user_id}
+            </h1>
             <Badge bg={ACCOUNT_STATUS_VARIANT[user.account_status] ?? "secondary"}>{user.account_status}</Badge>
-          )}
-          {subscription && (
-            <>
-              <Badge bg="primary">{subscription.plan_name ?? subscription.plan_id}</Badge>
-              <Badge bg={SUBSCRIPTION_STATUS_VARIANT[subscription.status] ?? "secondary"}>
-                {subscription.status}
-              </Badge>
-            </>
+            {subscription &&
+              (subscription.status === "active" ? (
+                // Subscription status is folded into the plan badge when healthy — a second
+                // "active" pill next to the account status badge above just reads as a
+                // duplicate at a glance. It still gets its own (colored) badge below when
+                // it needs attention (past_due, expired, cancelled).
+                <Badge bg="primary">{subscription.plan_name ?? subscription.plan_id}</Badge>
+              ) : (
+                <>
+                  <Badge bg="primary">{subscription.plan_name ?? subscription.plan_id}</Badge>
+                  <Badge bg={SUBSCRIPTION_STATUS_VARIANT[subscription.status] ?? "secondary"}>
+                    {subscription.status}
+                  </Badge>
+                </>
+              ))}
+          </div>
+          <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+            {user.company ?? "No company"}
+            {role ? ` · ${role}` : ""}
+            {use_case ? ` · ${use_case}` : ""} · Signed up {formatDateTime(user.created_at)}
+          </p>
+          {status_reason && (
+            <p className="mb-0 small mt-1" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
+              Status reason: {status_reason}
+            </p>
           )}
         </div>
-        <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-          {user.company ?? "No company"}
-          {role ? ` · ${role}` : ""}
-          {use_case ? ` · ${use_case}` : ""} · Signed up {formatDateTime(user.created_at)}
-        </p>
+        <ModerationPanel
+          user={user}
+          onChanged={() => {
+            setModerationPage(1);
+            setRefetchKey((k) => k + 1);
+          }}
+        />
       </div>
 
       {openFlags.map((flag) => (
@@ -310,243 +339,282 @@ export default function AdminUserDetailPage() {
         </Alert>
       ))}
 
-      <ModerationPanel
-        user={user}
-        statusReason={status_reason}
-        moderationActions={moderation.data?.rows ?? []}
-        moderationTotal={moderation.data?.total ?? 0}
-        moderationPage={moderationPage}
-        moderationPageSize={MODERATION_PAGE_SIZE}
-        moderationLoading={moderation.loading}
-        moderationError={moderation.error}
-        onModerationPageChange={setModerationPage}
-        onChanged={() => {
-          setModerationPage(1);
-          setRefetchKey((k) => k + 1);
-        }}
-      />
-
-      <div className="row g-3 mb-4">
-        <div className="col-6 col-lg-3">
-          <KpiTile label="Available" value={formatNumber(user.available_balance)} />
-        </div>
-        <div className="col-6 col-lg-3">
-          <KpiTile label="Held" value={formatNumber(user.held_balance)} />
-        </div>
-        <div className="col-6 col-lg-3">
-          <KpiTile label="Lifetime purchased" value={formatNumber(user.lifetime_purchased)} />
-        </div>
-        <div className="col-6 col-lg-3">
-          <KpiTile label="Lifetime consumed" value={formatNumber(user.lifetime_consumed)} />
-        </div>
+      <div className="admin-tab-strip mb-4">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`admin-tab-btn${activeTab === tab.key ? " active" : ""}`}
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <CreditGrantPanel
-        userId={user.user_id}
-        availableBalance={user.available_balance}
-        onChanged={() => {
-          setLedgerPage(1);
-          setRefetchKey((k) => k + 1);
-        }}
-      />
-
-      <div className="row g-3 mb-4">
-        <div className="col-12 col-xl-6">
-          <SectionCard title="Subscription" loading={false} error={null}>
-            {!subscription ? (
-              <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                No subscription
-              </div>
-            ) : (
-              <dl className="row mb-0 small">
-                <dt className="col-sm-4">Plan</dt>
-                <dd className="col-sm-8">{subscription.plan_name ?? subscription.plan_id}</dd>
-                <dt className="col-sm-4">Status</dt>
-                <dd className="col-sm-8">
-                  <Badge bg={SUBSCRIPTION_STATUS_VARIANT[subscription.status] ?? "secondary"}>
-                    {subscription.status}
-                  </Badge>
-                  {subscription.is_in_buffer && (
-                    <Badge bg="warning" className="ms-2">
-                      in buffer
-                    </Badge>
+      {activeTab === "account" && (
+        <>
+          <div className="row g-3 mb-4">
+            <div className="col-12 col-xl-6">
+              <SectionCard title="Account information" loading={false} error={null}>
+                <dl className="row mb-0 small">
+                  <dt className="col-sm-4">Company</dt>
+                  <dd className="col-sm-8">{user.company ?? "—"}</dd>
+                  {billing_profile && (
+                    <>
+                      <dt className="col-sm-4">Legal name</dt>
+                      <dd className="col-sm-8">{billing_profile.legal_name}</dd>
+                      <dt className="col-sm-4">Entity</dt>
+                      <dd className="col-sm-8">{billing_profile.entity_type}</dd>
+                      <dt className="col-sm-4">GSTIN</dt>
+                      <dd className="col-sm-8">{billing_profile.gstin ?? "—"}</dd>
+                      <dt className="col-sm-4">Address</dt>
+                      <dd className="col-sm-8">
+                        {billing_profile.address_line1}
+                        {billing_profile.address_line2 ? `, ${billing_profile.address_line2}` : ""}
+                        <br />
+                        {billing_profile.city}, {billing_profile.state_name} ({billing_profile.state_code}){" "}
+                        {billing_profile.postal_code}
+                        <br />
+                        {billing_profile.country}
+                      </dd>
+                    </>
                   )}
-                </dd>
-                <dt className="col-sm-4">Monthly credits</dt>
-                <dd className="col-sm-8">
-                  {subscription.credits != null ? formatNumber(subscription.credits) : "—"}
-                </dd>
-                <dt className="col-sm-4">Period</dt>
-                <dd className="col-sm-8">
-                  {formatDateTime(subscription.current_period_start)} →{" "}
-                  {formatDateTime(subscription.current_period_end)}
-                </dd>
-                <dt className="col-sm-4">Buffer until</dt>
-                <dd className="col-sm-8">{formatDateTime(subscription.grace_ends_at)}</dd>
-                <dt className="col-sm-4">Pending plan</dt>
-                <dd className="col-sm-8">{subscription.pending_plan_id ?? "—"}</dd>
-                {subscription.period_change_type && (
-                  <>
-                    <dt className="col-sm-4">Period change</dt>
+                  <dt className="col-sm-4">Signed up</dt>
+                  <dd className="col-sm-8">{formatDateTime(user.created_at)}</dd>
+                  <dt className="col-sm-4">Account status</dt>
+                  <dd className="col-sm-8">
+                    <Badge bg={ACCOUNT_STATUS_VARIANT[user.account_status] ?? "secondary"}>{user.account_status}</Badge>
+                  </dd>
+                  <dt className="col-sm-4">Onboarded</dt>
+                  <dd className="col-sm-8">
+                    <Badge bg={user.onboarded ? "success" : "secondary"}>{user.onboarded ? "Yes" : "No"}</Badge>
+                  </dd>
+                </dl>
+                {!billing_profile && (
+                  <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                    No billing profile on file
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+            <div className="col-12 col-xl-6">
+              <SectionCard title="Subscription" loading={false} error={null}>
+                {!subscription ? (
+                  <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                    No subscription
+                  </div>
+                ) : (
+                  <dl className="row mb-0 small">
+                    <dt className="col-sm-4">Plan</dt>
+                    <dd className="col-sm-8">{subscription.plan_name ?? subscription.plan_id}</dd>
+                    <dt className="col-sm-4">Status</dt>
                     <dd className="col-sm-8">
-                      {subscription.period_change_type}
-                      {subscription.period_credits_granted != null
-                        ? ` · ${formatNumber(subscription.period_credits_granted)} credits granted`
-                        : ""}
+                      <Badge bg={SUBSCRIPTION_STATUS_VARIANT[subscription.status] ?? "secondary"}>
+                        {subscription.status}
+                      </Badge>
+                      {subscription.is_in_buffer && (
+                        <Badge bg="warning" className="ms-2">
+                          in buffer
+                        </Badge>
+                      )}
                     </dd>
+                    <dt className="col-sm-4">Monthly credits</dt>
+                    <dd className="col-sm-8">
+                      {subscription.credits != null ? formatNumber(subscription.credits) : "—"}
+                    </dd>
+                    <dt className="col-sm-4">Period</dt>
+                    <dd className="col-sm-8">
+                      {formatDateTime(subscription.current_period_start)} →{" "}
+                      {formatDateTime(subscription.current_period_end)}
+                    </dd>
+                    <dt className="col-sm-4">Buffer until</dt>
+                    <dd className="col-sm-8">{formatDateTime(subscription.grace_ends_at)}</dd>
+                    <dt className="col-sm-4">Pending plan</dt>
+                    <dd className="col-sm-8">{subscription.pending_plan_id ?? "—"}</dd>
+                    {subscription.period_change_type && (
+                      <>
+                        <dt className="col-sm-4">Period change</dt>
+                        <dd className="col-sm-8">
+                          {subscription.period_change_type}
+                          {subscription.period_credits_granted != null
+                            ? ` · ${formatNumber(subscription.period_credits_granted)} credits granted`
+                            : ""}
+                        </dd>
+                      </>
+                    )}
+                  </dl>
+                )}
+              </SectionCard>
+            </div>
+          </div>
+
+          <ModerationHistoryCard
+            moderationActions={moderation.data?.rows ?? []}
+            moderationTotal={moderation.data?.total ?? 0}
+            moderationPage={moderationPage}
+            moderationPageSize={MODERATION_PAGE_SIZE}
+            moderationLoading={moderation.loading}
+            moderationError={moderation.error}
+            onModerationPageChange={setModerationPage}
+          />
+        </>
+      )}
+
+      {activeTab === "billing" && (
+        <>
+          <div className="row g-3 mb-4">
+            <div className="col-12">
+              <SectionCard
+                title={`Invoices (${invoices_total})`}
+                loading={false}
+                error={null}
+                action={
+                  emailSearch ? (
+                    <Link to={`/admin/invoices?search=${emailSearch}`} className="small">
+                      View all invoices &rarr;
+                    </Link>
+                  ) : undefined
+                }
+              >
+                {invoiceError && (
+                  <Alert variant="danger" className="py-2 small" dismissible onClose={() => setInvoiceError(null)}>
+                    {invoiceError}
+                  </Alert>
+                )}
+                <DataTable
+                  columns={invoiceColumns}
+                  rows={invoices}
+                  getRowKey={(row) => row.id}
+                  emptyMessage="No invoices yet"
+                />
+                {invoices_total > invoices.length && (
+                  <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                    Showing latest {invoices.length} of {invoices_total}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </div>
+
+          <div className="row g-3 mb-4">
+            <div className="col-12">
+              <SectionCard
+                title={`Payments (${payments_total})`}
+                loading={false}
+                error={null}
+                action={
+                  emailSearch ? (
+                    <Link to={`/admin/transactions?search=${emailSearch}`} className="small">
+                      View all payments &rarr;
+                    </Link>
+                  ) : undefined
+                }
+              >
+                <DataTable
+                  columns={paymentColumns}
+                  rows={payments}
+                  getRowKey={(row) => row.id}
+                  emptyMessage="No payments yet"
+                />
+                {payments_total > payments.length && (
+                  <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                    Showing latest {payments.length} of {payments_total}
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === "credits" && (
+        <>
+          <div className="row g-3 mb-4">
+            <div className="col-6 col-lg-3">
+              <KpiTile label="Available" value={formatNumber(user.available_balance)} />
+            </div>
+            <div className="col-6 col-lg-3">
+              <KpiTile label="Held" value={formatNumber(user.held_balance)} />
+            </div>
+            <div className="col-6 col-lg-3">
+              <KpiTile label="Lifetime purchased" value={formatNumber(user.lifetime_purchased)} />
+            </div>
+            <div className="col-6 col-lg-3">
+              <KpiTile label="Lifetime consumed" value={formatNumber(user.lifetime_consumed)} />
+            </div>
+          </div>
+
+          <CreditGrantPanel
+            userId={user.user_id}
+            availableBalance={user.available_balance}
+            onChanged={() => {
+              setLedgerPage(1);
+              setRefetchKey((k) => k + 1);
+            }}
+          />
+
+          <div className="row g-3 mb-4">
+            <div className="col-12">
+              <SectionCard title="Credit ledger" loading={ledger.loading} error={ledger.error}>
+                {ledger.data && (
+                  <>
+                    <DataTable
+                      columns={ledgerColumns}
+                      rows={ledger.data.rows}
+                      getRowKey={(row) => String(row.id)}
+                      emptyMessage="No ledger activity"
+                    />
+                    <PaginationBar
+                      page={ledgerPage}
+                      pageSize={LEDGER_PAGE_SIZE}
+                      total={ledger.data.total}
+                      onPageChange={setLedgerPage}
+                    />
                   </>
                 )}
-              </dl>
-            )}
-          </SectionCard>
-        </div>
-        <div className="col-12 col-xl-6">
-          <SectionCard title="Billing profile" loading={false} error={null}>
-            {!billing_profile ? (
-              <div className="small" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                No billing profile
-              </div>
-            ) : (
-              <dl className="row mb-0 small">
-                <dt className="col-sm-4">Legal name</dt>
-                <dd className="col-sm-8">{billing_profile.legal_name}</dd>
-                <dt className="col-sm-4">Entity</dt>
-                <dd className="col-sm-8">{billing_profile.entity_type}</dd>
-                <dt className="col-sm-4">GSTIN</dt>
-                <dd className="col-sm-8">{billing_profile.gstin ?? "—"}</dd>
-                <dt className="col-sm-4">Address</dt>
-                <dd className="col-sm-8">
-                  {billing_profile.address_line1}
-                  {billing_profile.address_line2 ? `, ${billing_profile.address_line2}` : ""}
-                  <br />
-                  {billing_profile.city}, {billing_profile.state_name} ({billing_profile.state_code}){" "}
-                  {billing_profile.postal_code}
-                  <br />
-                  {billing_profile.country}
-                </dd>
-              </dl>
-            )}
-          </SectionCard>
-        </div>
-      </div>
+              </SectionCard>
+            </div>
+          </div>
+        </>
+      )}
 
-      <div className="row g-3 mb-4">
-        <div className="col-12">
-          <SectionCard
-            title={`Invoices (${invoices_total})`}
-            loading={false}
-            error={null}
-            action={
-              emailSearch ? (
-                <Link to={`/admin/invoices?search=${emailSearch}`} className="small">
-                  View all invoices &rarr;
+      {activeTab === "lists" && (
+        <div className="row g-3 mb-4">
+          <div className="col-12">
+            <SectionCard
+              title={`Lists (${lists_total})`}
+              loading={false}
+              error={null}
+              action={
+                <Link to={`/admin/lists?userId=${encodeURIComponent(userId)}`} className="small">
+                  View all lists &rarr;
                 </Link>
-              ) : undefined
-            }
-          >
-            {invoiceError && (
-              <Alert variant="danger" className="py-2 small" dismissible onClose={() => setInvoiceError(null)}>
-                {invoiceError}
-              </Alert>
-            )}
-            <DataTable
-              columns={invoiceColumns}
-              rows={invoices}
-              getRowKey={(row) => row.id}
-              emptyMessage="No invoices yet"
-            />
-            {invoices_total > invoices.length && (
-              <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                Showing latest {invoices.length} of {invoices_total}
-              </div>
-            )}
-          </SectionCard>
+              }
+            >
+              <DataTable
+                columns={[
+                  { key: "name", header: "Name", render: (row: (typeof lists)[number]) => row.name },
+                  { key: "kind", header: "Kind", render: (row: (typeof lists)[number]) => row.kind },
+                  {
+                    key: "created_at",
+                    header: "Created",
+                    render: (row: (typeof lists)[number]) => formatDateTime(row.created_at),
+                  },
+                ]}
+                rows={lists}
+                getRowKey={(row) => row.id}
+                emptyMessage="No lists yet"
+              />
+              {lists_total > lists.length && (
+                <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
+                  Showing latest {lists.length} of {lists_total}
+                </div>
+              )}
+            </SectionCard>
+          </div>
         </div>
-      </div>
-
-      <div className="row g-3 mb-4">
-        <div className="col-12 col-xl-6">
-          <SectionCard
-            title={`Lists (${lists_total})`}
-            loading={false}
-            error={null}
-            action={
-              <Link to={`/admin/lists?userId=${encodeURIComponent(userId)}`} className="small">
-                View all lists &rarr;
-              </Link>
-            }
-          >
-            <DataTable
-              columns={[
-                { key: "name", header: "Name", render: (row: (typeof lists)[number]) => row.name },
-                { key: "kind", header: "Kind", render: (row: (typeof lists)[number]) => row.kind },
-                {
-                  key: "created_at",
-                  header: "Created",
-                  render: (row: (typeof lists)[number]) => formatDateTime(row.created_at),
-                },
-              ]}
-              rows={lists}
-              getRowKey={(row) => row.id}
-              emptyMessage="No lists yet"
-            />
-            {lists_total > lists.length && (
-              <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                Showing latest {lists.length} of {lists_total}
-              </div>
-            )}
-          </SectionCard>
-        </div>
-        <div className="col-12 col-xl-6">
-          <SectionCard
-            title={`Payments (${payments_total})`}
-            loading={false}
-            error={null}
-            action={
-              emailSearch ? (
-                <Link to={`/admin/transactions?search=${emailSearch}`} className="small">
-                  View all payments &rarr;
-                </Link>
-              ) : undefined
-            }
-          >
-            <DataTable
-              columns={paymentColumns}
-              rows={payments}
-              getRowKey={(row) => row.id}
-              emptyMessage="No payments yet"
-            />
-            {payments_total > payments.length && (
-              <div className="small mt-2" style={{ color: ADMIN_CHART_COLORS.ink.muted }}>
-                Showing latest {payments.length} of {payments_total}
-              </div>
-            )}
-          </SectionCard>
-        </div>
-      </div>
-
-      <div className="row g-3 mb-4">
-        <div className="col-12">
-          <SectionCard title="Credit ledger" loading={ledger.loading} error={ledger.error}>
-            {ledger.data && (
-              <>
-                <DataTable
-                  columns={ledgerColumns}
-                  rows={ledger.data.rows}
-                  getRowKey={(row) => String(row.id)}
-                  emptyMessage="No ledger activity"
-                />
-                <PaginationBar
-                  page={ledgerPage}
-                  pageSize={LEDGER_PAGE_SIZE}
-                  total={ledger.data.total}
-                  onPageChange={setLedgerPage}
-                />
-              </>
-            )}
-          </SectionCard>
-        </div>
-      </div>
+      )}
     </>
   );
 }

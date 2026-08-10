@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button, Form, Modal } from "react-bootstrap";
+import { Badge, Button, Dropdown, Form, Modal } from "react-bootstrap";
 import { setUserStatus } from "../api/adminApi";
 import { ACCOUNT_STATUS_VARIANT } from "../badgeVariants";
 import { formatDateTime } from "../format";
@@ -56,33 +56,50 @@ const ACTION_META: Record<ModerationAction, ActionMeta> = {
   },
 };
 
+const historyColumns = [
+  { key: "created_at", header: "When", render: (row: ModerationActionRow) => formatDateTime(row.created_at) },
+  {
+    key: "action",
+    header: "Action",
+    render: (row: ModerationActionRow) => (
+      <Badge bg={ACCOUNT_STATUS_VARIANT[row.new_status] ?? "secondary"}>{ACTION_META[row.action]?.label ?? row.action}</Badge>
+    ),
+  },
+  {
+    key: "change",
+    header: "Change",
+    render: (row: ModerationActionRow) => (
+      <span className="small">
+        {row.previous_status} &rarr; {row.new_status}
+      </span>
+    ),
+  },
+  { key: "reason", header: "Reason", render: (row: ModerationActionRow) => row.reason ?? "—" },
+  {
+    key: "until",
+    header: "Until",
+    render: (row: ModerationActionRow) => (row.suspended_until ? formatDateTime(row.suspended_until) : "—"),
+  },
+  {
+    key: "acted_by",
+    header: "By",
+    render: (row: ModerationActionRow) => row.acted_by_email ?? (row.acted_by ? row.acted_by : "System"),
+  },
+];
+
 interface ModerationPanelProps {
   user: AdminUserRow;
-  statusReason: string | null;
-  moderationActions: ModerationActionRow[];
-  moderationTotal: number;
-  moderationPage: number;
-  moderationPageSize: number;
-  moderationLoading: boolean;
-  moderationError: string | null;
-  onModerationPageChange: (page: number) => void;
   // Called after a successful status change so the parent can refetch the
   // user detail (status badge, reason, and history all update together).
   onChanged: () => void;
 }
 
-export default function ModerationPanel({
-  user,
-  statusReason,
-  moderationActions,
-  moderationTotal,
-  moderationPage,
-  moderationPageSize,
-  moderationLoading,
-  moderationError,
-  onModerationPageChange,
-  onChanged,
-}: ModerationPanelProps) {
+// Compact header control: an "Actions" dropdown (Freeze / Suspend / Ban /
+// Reactivate, filtered to whichever would actually change the current
+// status) plus the confirmation modal. Lives in the page header next to the
+// status badge — the moderation history table is a separate export
+// (ModerationHistoryCard) so it can be placed in the Account tab instead.
+export default function ModerationPanel({ user, onChanged }: ModerationPanelProps) {
   const status = user.account_status;
   const [pendingAction, setPendingAction] = useState<ModerationAction | null>(null);
   const [reason, setReason] = useState("");
@@ -90,7 +107,6 @@ export default function ModerationPanel({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Offer every transition that would actually change the current status.
   const availableActions = (Object.keys(ACTION_TO_STATUS) as ModerationAction[]).filter(
     (action) => ACTION_TO_STATUS[action] !== status,
   );
@@ -148,98 +164,22 @@ export default function ModerationPanel({
 
   const meta = pendingAction ? ACTION_META[pendingAction] : null;
 
-  const historyColumns = [
-    { key: "created_at", header: "When", render: (row: ModerationActionRow) => formatDateTime(row.created_at) },
-    {
-      key: "action",
-      header: "Action",
-      render: (row: ModerationActionRow) => (
-        <Badge bg={ACCOUNT_STATUS_VARIANT[row.new_status] ?? "secondary"}>{ACTION_META[row.action]?.label ?? row.action}</Badge>
-      ),
-    },
-    {
-      key: "change",
-      header: "Change",
-      render: (row: ModerationActionRow) => (
-        <span className="small">
-          {row.previous_status} &rarr; {row.new_status}
-        </span>
-      ),
-    },
-    { key: "reason", header: "Reason", render: (row: ModerationActionRow) => row.reason ?? "—" },
-    {
-      key: "until",
-      header: "Until",
-      render: (row: ModerationActionRow) => (row.suspended_until ? formatDateTime(row.suspended_until) : "—"),
-    },
-    {
-      key: "acted_by",
-      header: "By",
-      render: (row: ModerationActionRow) => row.acted_by_email ?? (row.acted_by ? row.acted_by : "System"),
-    },
-  ];
-
   return (
     <>
-      <div className="row g-3 mb-4">
-        <div className="col-12">
-          <SectionCard title="Account status & moderation" loading={false} error={null}>
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-                Current status:
-              </span>
-              <Badge bg={ACCOUNT_STATUS_VARIANT[status] ?? "secondary"}>{status}</Badge>
-              {status === "suspended" && (
-                <span className="small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-                  {user.suspended_until ? `until ${formatDateTime(user.suspended_until)}` : "(indefinite)"}
-                </span>
-              )}
-            </div>
-
-            {statusReason && (
-              <div className="small mb-3" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-                Reason: {statusReason}
-              </div>
-            )}
-
-            <div className="d-flex flex-wrap gap-2">
-              {availableActions.map((action) => (
-                <Button
-                  key={action}
-                  size="sm"
-                  variant={action === "reactivate" ? ACTION_META[action].variant : `outline-${ACTION_META[action].variant}`}
-                  onClick={() => openModal(action)}
-                >
-                  {ACTION_META[action].label}
-                </Button>
-              ))}
-            </div>
-          </SectionCard>
-        </div>
-      </div>
-
-      <div className="row g-3 mb-4">
-        <div className="col-12">
-          <SectionCard
-            title={`Moderation history (${moderationTotal})`}
-            loading={moderationLoading}
-            error={moderationError}
-          >
-            <DataTable
-              columns={historyColumns}
-              rows={moderationActions}
-              getRowKey={(row) => row.id}
-              emptyMessage="No moderation actions yet"
-            />
-            <PaginationBar
-              page={moderationPage}
-              pageSize={moderationPageSize}
-              total={moderationTotal}
-              onPageChange={onModerationPageChange}
-            />
-          </SectionCard>
-        </div>
-      </div>
+      {availableActions.length > 0 && (
+        <Dropdown align="end">
+          <Dropdown.Toggle size="sm" variant="outline-secondary" id="user-moderation-actions">
+            Actions
+          </Dropdown.Toggle>
+          <Dropdown.Menu>
+            {availableActions.map((action) => (
+              <Dropdown.Item key={action} onClick={() => openModal(action)}>
+                {ACTION_META[action].label}
+              </Dropdown.Item>
+            ))}
+          </Dropdown.Menu>
+        </Dropdown>
+      )}
 
       <Modal show={pendingAction !== null} onHide={closeModal} centered>
         <Modal.Header closeButton={!submitting}>
@@ -295,5 +235,52 @@ export default function ModerationPanel({
         </Modal.Footer>
       </Modal>
     </>
+  );
+}
+
+interface ModerationHistoryCardProps {
+  moderationActions: ModerationActionRow[];
+  moderationTotal: number;
+  moderationPage: number;
+  moderationPageSize: number;
+  moderationLoading: boolean;
+  moderationError: string | null;
+  onModerationPageChange: (page: number) => void;
+}
+
+// The read-only moderation audit log, split out from the Actions control so
+// it can be placed in the Account tab while the trigger stays in the header.
+export function ModerationHistoryCard({
+  moderationActions,
+  moderationTotal,
+  moderationPage,
+  moderationPageSize,
+  moderationLoading,
+  moderationError,
+  onModerationPageChange,
+}: ModerationHistoryCardProps) {
+  return (
+    <div className="row g-3 mb-4">
+      <div className="col-12">
+        <SectionCard
+          title={`Moderation history (${moderationTotal})`}
+          loading={moderationLoading}
+          error={moderationError}
+        >
+          <DataTable
+            columns={historyColumns}
+            rows={moderationActions}
+            getRowKey={(row) => row.id}
+            emptyMessage="No moderation actions yet"
+          />
+          <PaginationBar
+            page={moderationPage}
+            pageSize={moderationPageSize}
+            total={moderationTotal}
+            onPageChange={onModerationPageChange}
+          />
+        </SectionCard>
+      </div>
+    </div>
   );
 }

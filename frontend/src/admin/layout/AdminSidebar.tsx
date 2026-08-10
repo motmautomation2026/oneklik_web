@@ -5,10 +5,8 @@ import {
   ChevronDoubleLeft,
   ChevronDoubleRight,
   CreditCard2Front,
-  FileEarmarkText,
   LifePreserver,
   PeopleFill,
-  Receipt,
   Speedometer2,
   X,
 } from "react-bootstrap-icons";
@@ -24,6 +22,11 @@ interface AdminNavItem {
   // in this console that gets worse the longer it goes unseen, so it is the
   // one nav item that earns a count.
   badge?: boolean;
+  // Billing only. It links straight to /admin/transactions, but should still
+  // read as "active" from /admin/invoices and /admin/subscriptions —
+  // switching between those three now happens via the in-page tab strip
+  // (BillingTabs), not a sidebar dropdown.
+  activeMatch?: string[];
 }
 
 // Polling, not realtime. The count only has to be roughly current — a minute
@@ -40,12 +43,18 @@ const BADGE_POLL_MS = 60_000;
 // still lives on AdminUserDetailPage.) Lists has no nav entry on purpose —
 // it's only reachable via a user's detail page ("View all lists →"), the
 // route at /admin/lists still exists and works, it's just not in the sidebar.
+// Billing is a single link (not a dropdown) to /admin/transactions — the
+// routes for Invoices and Subscriptions still exist and work, they're just
+// reached from the Billing page's own tabs rather than the sidebar.
 const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: "/admin", label: "Dashboard", icon: Speedometer2, end: true },
   { to: "/admin/users", label: "Users", icon: PeopleFill },
-  { to: "/admin/transactions", label: "Transactions", icon: Receipt },
-  { to: "/admin/invoices", label: "Invoices", icon: FileEarmarkText },
-  { to: "/admin/subscriptions", label: "Subscriptions", icon: CreditCard2Front },
+  {
+    to: "/admin/transactions",
+    label: "Billing",
+    icon: CreditCard2Front,
+    activeMatch: ["/admin/invoices", "/admin/subscriptions"],
+  },
   { to: "/admin/runs", label: "Runs", icon: Activity },
   { to: "/admin/support", label: "Support", icon: LifePreserver, badge: true },
 ];
@@ -95,6 +104,29 @@ export default function AdminSidebar({ mobileOpen, onClose }: AdminSidebarProps)
     });
   }
 
+  function renderNavItem(item: AdminNavItem) {
+    const Icon = item.icon;
+    const isActive = item.end
+      ? location.pathname === item.to
+      : location.pathname.startsWith(item.to) || (item.activeMatch?.some((p) => location.pathname.startsWith(p)) ?? false);
+    return (
+      <Link
+        key={item.to}
+        to={item.to}
+        className={`app-sidebar-link${isActive ? " active" : ""}`}
+        onClick={onClose}
+      >
+        <Icon size={18} />
+        <span className="app-sidebar-link-label">{item.label}</span>
+        {item.badge && supportCount > 0 && (
+          <span className="app-sidebar-badge" title={`${supportCount} awaiting a reply`}>
+            {supportCount > 99 ? "99+" : supportCount}
+          </span>
+        )}
+      </Link>
+    );
+  }
+
   return (
     <>
       {mobileOpen && <div className="app-sidebar-backdrop" onClick={onClose} />}
@@ -122,28 +154,7 @@ export default function AdminSidebar({ mobileOpen, onClose }: AdminSidebarProps)
           </button>
         </div>
 
-        <nav className="app-sidebar-nav">
-          {ADMIN_NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.end ? location.pathname === item.to : location.pathname.startsWith(item.to);
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={`app-sidebar-link${isActive ? " active" : ""}`}
-                onClick={onClose}
-              >
-                <Icon size={18} />
-                <span className="app-sidebar-link-label">{item.label}</span>
-                {item.badge && supportCount > 0 && (
-                  <span className="app-sidebar-badge" title={`${supportCount} awaiting a reply`}>
-                    {supportCount > 99 ? "99+" : supportCount}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
+        <nav className="app-sidebar-nav">{ADMIN_NAV_ITEMS.map(renderNavItem)}</nav>
       </aside>
     </>
   );

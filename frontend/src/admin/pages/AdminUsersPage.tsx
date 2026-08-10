@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Form } from "react-bootstrap";
+import { Badge, Button, Form, InputGroup } from "react-bootstrap";
+import { ExclamationTriangleFill, FlagFill, PeopleFill, PersonCheckFill, Search } from "react-bootstrap-icons";
 import { Link, useSearchParams } from "react-router-dom";
 import { exportUsersCsv, fetchTopCompanies, fetchUsers, fetchUsersKpis } from "../api/adminApi";
 import DataTable from "../components/DataTable";
@@ -131,37 +132,16 @@ export default function AdminUsersPage() {
           "—"
         ),
     },
-    {
-      key: "onboarded",
-      header: "Onboarded",
-      render: (row: AdminUserRow) => (
-        <Badge bg={row.onboarded ? "success" : "secondary"}>{row.onboarded ? "Yes" : "No"}</Badge>
-      ),
-    },
     { key: "signed_up", header: "Signed up", render: (row: AdminUserRow) => formatDateTime(row.created_at) },
     {
-      key: "available",
-      header: "Available",
+      key: "actions",
+      header: "",
       align: "end" as const,
-      render: (row: AdminUserRow) => formatNumber(row.available_balance),
-    },
-    {
-      key: "held",
-      header: "Held",
-      align: "end" as const,
-      render: (row: AdminUserRow) => formatNumber(row.held_balance),
-    },
-    {
-      key: "purchased",
-      header: "Lifetime purchased",
-      align: "end" as const,
-      render: (row: AdminUserRow) => formatNumber(row.lifetime_purchased),
-    },
-    {
-      key: "consumed",
-      header: "Lifetime consumed",
-      align: "end" as const,
-      render: (row: AdminUserRow) => formatNumber(row.lifetime_consumed),
+      render: (row: AdminUserRow) => (
+        <Link to={`/admin/users/${row.user_id}`} className="btn btn-sm btn-outline-secondary">
+          View
+        </Link>
+      ),
     },
   ];
 
@@ -182,6 +162,8 @@ export default function AdminUsersPage() {
             label="Total users"
             value={kpis.data ? formatNumber(kpis.data.total_users) : "—"}
             sublabel={kpis.data ? `${formatNumber(kpis.data.new_this_week)} new this week` : undefined}
+            icon={PeopleFill}
+            accent={ADMIN_CHART_COLORS.categorical.blue}
           />
         </div>
         <div className="col-6 col-lg-3">
@@ -189,6 +171,8 @@ export default function AdminUsersPage() {
             label="Onboarded"
             value={kpis.data ? `${Math.round(kpis.data.onboarded_pct * 100)}%` : "—"}
             sublabel={kpis.data ? `${formatNumber(kpis.data.new_this_month)} new this month` : undefined}
+            icon={PersonCheckFill}
+            accent={ADMIN_CHART_COLORS.status.good}
           />
         </div>
         <div className="col-6 col-lg-3">
@@ -196,6 +180,8 @@ export default function AdminUsersPage() {
             label="Zero balance"
             value={kpis.data ? formatNumber(kpis.data.zero_balance_count) : "—"}
             sublabel="At risk of churn"
+            icon={ExclamationTriangleFill}
+            accent={ADMIN_CHART_COLORS.status.warning}
           />
         </div>
         <div className="col-6 col-lg-3">
@@ -203,6 +189,8 @@ export default function AdminUsersPage() {
             label="Open flags"
             value={kpis.data ? formatNumber(kpis.data.open_flagged_count) : "—"}
             sublabel={kpis.data ? `${formatNumber(kpis.data.avg_lifetime_consumed)} avg. credits consumed` : undefined}
+            icon={FlagFill}
+            accent={ADMIN_CHART_COLORS.status.critical}
           />
         </div>
       </div>
@@ -212,40 +200,25 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      <div className="row g-3 mb-4">
-        <div className="col-12">
-          <SectionCard title="Top companies" loading={topCompanies.loading} error={topCompanies.error}>
-            {topCompanies.data && (
-              <DataTable
-                columns={companyColumns}
-                rows={topCompanies.data.companies}
-                getRowKey={(row) => row.company}
-                emptyMessage="No companies on file yet"
-              />
-            )}
-          </SectionCard>
-        </div>
-      </div>
-
-      <SectionCard
-        title="Directory"
-        loading={users.loading}
-        error={users.error}
-        action={
-          <div className="d-flex gap-2">
+      <SectionCard title="Directory" loading={users.loading} error={users.error}>
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <InputGroup size="sm" style={{ maxWidth: 280 }}>
+            <InputGroup.Text style={{ background: ADMIN_CHART_COLORS.surface }}>
+              <Search size={13} />
+            </InputGroup.Text>
             <Form.Control
               type="search"
-              size="sm"
               placeholder="Search by email or company…"
               value={searchInput}
               onChange={(e) => handleSearchChange(e.target.value)}
-              style={{ maxWidth: 280 }}
             />
+          </InputGroup>
+          <div className="d-flex flex-wrap gap-2 align-items-center justify-content-end">
             <Form.Select
               size="sm"
               value={statusFilter}
               onChange={(e) => handleStatusChange(e.target.value)}
-              style={{ maxWidth: 150 }}
+              style={{ width: 150 }}
               aria-label="Filter by account status"
             >
               <option value="">All statuses</option>
@@ -259,8 +232,7 @@ export default function AdminUsersPage() {
               {exporting ? "Exporting…" : "Export CSV"}
             </Button>
           </div>
-        }
-      >
+        </div>
         {users.data && (
           <>
             <DataTable
@@ -273,6 +245,21 @@ export default function AdminUsersPage() {
           </>
         )}
       </SectionCard>
+
+      <div className="row g-3 mt-1">
+        <div className="col-12">
+          <SectionCard title="Top companies" loading={topCompanies.loading} error={topCompanies.error}>
+            {topCompanies.data && (
+              <DataTable
+                columns={companyColumns}
+                rows={topCompanies.data.companies}
+                getRowKey={(row) => row.company}
+                emptyMessage="No companies on file yet"
+              />
+            )}
+          </SectionCard>
+        </div>
+      </div>
     </>
   );
 }

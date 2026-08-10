@@ -3,6 +3,7 @@ import { Badge, Form } from "react-bootstrap";
 import { Link } from "react-router-dom";
 import { fetchSubscriptions, fetchSubscriptionsKpis } from "../api/adminApi";
 import { SUBSCRIPTION_STATUS_VARIANT } from "../badgeVariants";
+import BillingTabs from "../components/BillingTabs";
 import BreakdownBar, { type BreakdownEntry } from "../components/BreakdownBar";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
@@ -119,14 +120,7 @@ export default function AdminSubscriptionsPage() {
 
   return (
     <>
-      <div className="mb-4">
-        <h1 className="h4 mb-1" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-          Subscriptions
-        </h1>
-        <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-          Plan mix, recurring revenue, and accounts approaching lapse.
-        </p>
-      </div>
+      <BillingTabs />
 
       <div className="row g-3 mb-4">
         <div className="col-6 col-lg">

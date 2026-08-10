@@ -8,6 +8,7 @@ import {
   openAdminInvoiceHtml,
 } from "../api/adminApi";
 import { PAYMENT_STATUS_VARIANT } from "../badgeVariants";
+import BillingTabs from "../components/BillingTabs";
 import DataTable from "../components/DataTable";
 import KpiTile from "../components/KpiTile";
 import PaginationBar from "../components/PaginationBar";
@@ -149,14 +150,7 @@ export default function AdminTransactionsPage() {
 
   return (
     <>
-      <div className="mb-4">
-        <h1 className="h4 mb-1" style={{ color: ADMIN_CHART_COLORS.ink.primary }}>
-          Transactions
-        </h1>
-        <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
-          Full Razorpay payment ledger, filterable by status.
-        </p>
-      </div>
+      <BillingTabs />
 
       <div className="row g-3 mb-4">
         <div className="col-6 col-lg-3">

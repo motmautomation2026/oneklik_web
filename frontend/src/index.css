@@ -637,6 +637,69 @@ label.text-uppercase,
   flex-shrink: 0;
 }
 
+/* ── Admin billing: shared tab strip across Transactions/Invoices/
+   Subscriptions (see BillingTabs.tsx) ────────────────────────────────── */
+
+.admin-billing-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-billing-tab {
+  padding: 0.6rem 0.05rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink-secondary, #52514e);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.admin-billing-tab:hover {
+  color: var(--brand-600);
+}
+
+.admin-billing-tab.active {
+  color: var(--brand-600);
+  border-bottom-color: var(--brand-600);
+}
+
+/* ── Admin: generic in-page tab strip (e.g. AdminUserDetailPage's
+   Account/Billing/Credits & Usage/Lists tabs). Same look as the billing tab
+   strip above but built from plain buttons since these switch local state,
+   not routes. ─────────────────────────────────────────────────────────── */
+
+.admin-tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-tab-btn {
+  padding: 0.6rem 0.05rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink-secondary, #52514e);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+
+.admin-tab-btn:hover {
+  color: var(--brand-600);
+}
+
+.admin-tab-btn.active {
+  color: var(--brand-600);
+  border-bottom-color: var(--brand-600);
+}
+
 /* ── Cards & tables: a touch more definition than bare Bootstrap ────── */
 
 .card {

@@ -41,9 +41,9 @@ interface SubscriptionInfo {
 type UiStatus = "paid" | "payment_due" | "past_due" | "void";
 
 const PLAN_LABELS: Record<string, string> = {
+  launch: "Launch",
   starter: "Starter",
   growth: "Growth",
-  business: "Business",
 };
 
 function descriptionFromInvoice(inv: InvoiceListItem): string {

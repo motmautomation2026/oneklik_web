@@ -21,9 +21,20 @@ export interface CreditPack {
  */
 export const CREDIT_PACKS: CreditPack[] = [
   {
+    id: "launch",
+    name: "Launch Monthly",
+    credits: 1000,
+    priceMinorUnits: 300_000, // ₹3,000.00
+    currency: "INR",
+    taxRateBps: 1800,
+    isTaxInclusive: false,
+    sacCode: "998313",
+    comingSoon: false,
+  },
+  {
     id: "starter",
     name: "Starter Monthly",
-    credits: 4000,
+    credits: 3000,
     priceMinorUnits: 600_000, // ₹6,000.00
     currency: "INR",
     taxRateBps: 1800,
@@ -35,18 +46,7 @@ export const CREDIT_PACKS: CreditPack[] = [
     id: "growth",
     name: "Growth Monthly",
     credits: 12000,
-    priceMinorUnits: 1_700_000, // ₹17,000.00
-    currency: "INR",
-    taxRateBps: 1800,
-    isTaxInclusive: false,
-    sacCode: "998313",
-    comingSoon: false,
-  },
-  {
-    id: "business",
-    name: "Business Monthly",
-    credits: 20000,
-    priceMinorUnits: 2_800_000, // ₹28,000.00
+    priceMinorUnits: 2_000_000, // ₹20,000.00
     currency: "INR",
     taxRateBps: 1800,
     isTaxInclusive: false,

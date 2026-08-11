@@ -59,9 +59,9 @@ const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
 const SALES_EMAIL = "sales@quickicp.com";
 
 const PLAN_INFO: Record<string, { label: string; bestFor: string }> = {
+  launch: { label: "Launch", bestFor: "Getting started" },
   starter: { label: "Starter", bestFor: "Individual users" },
   growth: { label: "Growth", bestFor: "Small teams" },
-  business: { label: "Business", bestFor: "Growing businesses" },
 };
 
 const PLAN_BILLING_POINTS = [

@@ -38,9 +38,9 @@ const STATUS_OPTIONS: { value: InvoiceStatus | ""; label: string }[] = [
 
 const PLAN_OPTIONS = [
   { value: "", label: "All plans" },
+  { value: "launch", label: "Launch" },
   { value: "starter", label: "Starter" },
   { value: "growth", label: "Growth" },
-  { value: "business", label: "Business" },
 ];
 
 function gstTotalMinor(row: AdminInvoiceListRow): number {

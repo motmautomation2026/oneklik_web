@@ -27,15 +27,15 @@ const STATUS_OPTIONS: { value: SubscriptionStatus | ""; label: string }[] = [
 
 const PLAN_OPTIONS = [
   { value: "", label: "All plans" },
+  { value: "launch", label: "Launch" },
   { value: "starter", label: "Starter" },
   { value: "growth", label: "Growth" },
-  { value: "business", label: "Business" },
 ];
 
 const PLAN_COLORS: Record<string, string> = {
-  starter: ADMIN_CHART_COLORS.categorical.blue,
-  growth: ADMIN_CHART_COLORS.categorical.orange,
-  business: ADMIN_CHART_COLORS.categorical.aqua,
+  launch: ADMIN_CHART_COLORS.categorical.blue,
+  starter: ADMIN_CHART_COLORS.categorical.orange,
+  growth: ADMIN_CHART_COLORS.categorical.aqua,
 };
 
 export default function AdminSubscriptionsPage() {

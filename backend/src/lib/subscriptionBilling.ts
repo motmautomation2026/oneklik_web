@@ -1,9 +1,9 @@
 import { findPack, type CreditPack } from "./creditPacks.js";
 
 export const PLAN_RANKS: Record<string, number> = {
-  starter: 1,
-  growth: 2,
-  business: 3,
+  launch: 1,
+  starter: 2,
+  growth: 3,
 };
 
 export function planRank(planId: string): number {

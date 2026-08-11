@@ -366,7 +366,7 @@ function subscriptionStatusParam(value: unknown): SubscriptionStatus | undefined
 function planIdParam(value: unknown): string | undefined {
   const v = stringParam(value);
   if (!v) return undefined;
-  if (!["starter", "growth", "business"].includes(v)) return undefined;
+  if (!["launch", "starter", "growth"].includes(v)) return undefined;
   return v;
 }
 

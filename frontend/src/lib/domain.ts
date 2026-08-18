@@ -30,6 +30,10 @@ const TWO_PART_SUFFIXES = new Set([
 // data provider behind that search rejects subdomains outright ("Subdomains
 // are not supported: ..."). Returns "" when the input is empty or not
 // parseable as a URL/host.
+// Requires at least two dot-separated labels, each alphanumeric/hyphen only
+// (no stray "%", no bare single-label junk).
+const VALID_DOMAIN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
 export function normalizeDomain(website: string | null | undefined): string {
   if (!website) return "";
   const trimmed = website.trim();
@@ -43,6 +47,12 @@ export function normalizeDomain(website: string | null | undefined): string {
     return "";
   }
   if (!host) return "";
+
+  // Guards against malformed input (e.g. a company name and URL pasted
+  // together with no delimiter, like "Linamarhttps://linamar.com") that
+  // URL's lenient parser would otherwise turn into a garbage single-label
+  // "hostname" instead of failing outright.
+  if (!VALID_DOMAIN.test(host)) return "";
 
   const labels = host.split(".").filter(Boolean);
   if (labels.length <= 2) return host;

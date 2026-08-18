@@ -85,12 +85,13 @@ export default function TagInput({
     }
   }
 
-  // Pasting a whole block (one per line, or comma-separated) adds every
-  // value at once instead of leaving it as one garbled entry.
+  // Pasting a whole block (one per line, comma-separated, or tab-separated —
+  // e.g. two spreadsheet columns copied together as "Company<TAB>URL") adds
+  // every value at once instead of leaving it as one garbled entry.
   function handlePaste(e: ClipboardEvent<HTMLInputElement>) {
     const text = e.clipboardData.getData("text");
     const parts = text
-      .split(/[\n,]+/)
+      .split(/[\n,\t]+/)
       .map((s) => (normalize ? normalize(s) : s.trim()))
       .filter(Boolean);
 

@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./lib/AuthProvider";
 import RequireAuth from "./components/RequireAuth";
 import RootRedirect from "./components/RootRedirect";
+import ErrorBoundary from "./components/ErrorBoundary";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import VerifyEmailPage from "./pages/VerifyEmailPage";
@@ -42,6 +43,7 @@ function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
@@ -227,6 +229,7 @@ function App() {
           </Route>
           <Route path="*" element={<RootRedirect />} />
         </Routes>
+        </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   );

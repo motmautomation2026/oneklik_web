@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -47,6 +47,29 @@ interface Person {
 
 function creditsForCount(count: number): number {
   return Math.max(1, Math.ceil(count / 25));
+}
+
+// Mirrors the backend's MAX_TOTAL_PEOPLE (peopleSearch.ts) and
+// MAX_ROWS_PER_REQUEST (revealFlow.ts) — kept as named constants here so the
+// two limits this page enforces (search size, reveal batch size) can't drift
+// out of sync with what the server actually allows.
+const TOTAL_PEOPLE_CAP = 200;
+const MIN_COUNT_PER_COMPANY = 5;
+const ABSOLUTE_MAX_COUNT_PER_COMPANY = 50;
+const REVEAL_BATCH_SIZE = 50;
+
+// More domains means less headroom per domain, so the per-company cap
+// shrinks as you add domains instead of letting the total silently blow
+// past what the search endpoint will actually return.
+function maxCountPerCompany(domainCount: number): number {
+  if (domainCount <= 0) return ABSOLUTE_MAX_COUNT_PER_COMPANY;
+  return Math.min(ABSOLUTE_MAX_COUNT_PER_COMPANY, Math.max(MIN_COUNT_PER_COMPANY, Math.floor(TOTAL_PEOPLE_CAP / domainCount)));
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size));
+  return batches;
 }
 
 async function fetchProspeoSuggestions(type: "location" | "job_title", query: string): Promise<string[]> {
@@ -100,6 +123,18 @@ export default function PeopleSearchPage() {
   const [notFoundPhoneRows, setNotFoundPhoneRows] = useState<Set<number>>(new Set());
   const [revealError, setRevealError] = useState<string | null>(null);
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
+  const [revealProgress, setRevealProgress] = useState<{ done: number; total: number } | null>(null);
+  const revealBusy = revealingEmailRows.size > 0 || revealingPhoneRows.size > 0;
+
+  // Guards against setState-after-unmount if a user navigates away mid-batch
+  // — the batch loop checks this before touching state on every iteration.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [listName, setListName] = useState("");
@@ -108,7 +143,17 @@ export default function PeopleSearchPage() {
   const [saved, setSaved] = useState(false);
 
   const canSearch = domains.length > 0;
-  const maxTotal = Math.min(domains.length * countPerCompany, 200);
+  const countPerCompanyLimit = maxCountPerCompany(domains.length);
+  const maxTotal = Math.min(domains.length * countPerCompany, TOTAL_PEOPLE_CAP);
+
+  // Adding more domains can drop the per-company ceiling below whatever the
+  // user had previously set — re-clamp so the field never silently holds a
+  // value the backend would reject/truncate.
+  useEffect(() => {
+    if (countPerCompany > countPerCompanyLimit) setCountPerCompany(countPerCompanyLimit);
+    // Only the ceiling changing (i.e. domains.length changing) should trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countPerCompanyLimit]);
 
   function handleClearFilters() {
     setDomains([]);
@@ -121,7 +166,14 @@ export default function PeopleSearchPage() {
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
-    if (!canSearch) return;
+    // A reveal batch sequence writes into `people` by array index as each
+    // batch resolves — running a fresh search (which replaces `people`
+    // wholesale) while that's in flight would let a late-arriving batch
+    // write stale results into the new, unrelated result set. The Find
+    // People button is disabled for this too, but the guard has to live
+    // here as well since an Enter keypress inside the form submits it
+    // regardless of the button's disabled state.
+    if (!canSearch || revealBusy) return;
     setLoading(true);
     setError(null);
     setSaved(false);
@@ -145,7 +197,7 @@ export default function PeopleSearchPage() {
 
   async function handleAiSearch(e: FormEvent) {
     e.preventDefault();
-    if (!sentence.trim()) return;
+    if (!sentence.trim() || revealBusy) return;
     setLoading(true);
     setError(null);
     setSaved(false);
@@ -212,8 +264,21 @@ export default function PeopleSearchPage() {
     setSelected((prev) => (prev.size === people.length ? new Set() : new Set(people.map((_, i) => i))));
   }
 
+  // Sends the selection in sequential batches of REVEAL_BATCH_SIZE rather
+  // than one request for the whole selection. This isn't just a size
+  // guard: it structurally prevents the bug that took the People page down
+  // in production, where a request larger than the server's per-request
+  // cap came back with fewer results than were selected, and the old code
+  // indexed the (shorter) response against the (longer) selection —
+  // writing `undefined` into rows past the cutoff, which crashed every
+  // future render of the table. Each batch here is sized to match exactly
+  // what the server processes, so response length and selection length can
+  // never diverge, and the per-row write below is guarded anyway as a
+  // second line of defense. Batches run one at a time (not in parallel) so
+  // a large reveal doesn't throw a burst of simultaneous large requests at
+  // the enrichment provider.
   async function reveal(indices: number[], field: "email" | "phone") {
-    if (indices.length === 0) return;
+    if (indices.length === 0 || revealBusy) return;
     const setRevealing = field === "email" ? setRevealingEmailRows : setRevealingPhoneRows;
     const setNotFound = field === "email" ? setNotFoundEmailRows : setNotFoundPhoneRows;
     const personField = field === "email" ? "Email" : "Phone";
@@ -221,54 +286,86 @@ export default function PeopleSearchPage() {
 
     setRevealError(null);
     setRevealNotice(null);
-    setRevealing((prev) => new Set([...prev, ...indices]));
-    setNotFound((prev) => {
-      const next = new Set(prev);
-      indices.forEach((i) => next.delete(i));
-      return next;
-    });
+    setRevealing(new Set(indices));
+
+    const batches = chunk(indices, REVEAL_BATCH_SIZE);
+    setRevealProgress(batches.length > 1 ? { done: 0, total: indices.length } : null);
+
+    let totalSkipped = 0;
+    let processed = 0;
+
     try {
-      const selectedPeople = indices.map((i) => people[i]);
-      const result = await apiPost<{ people: Person[]; skipped_count?: number }>(endpoint, {
-        people: selectedPeople,
-      });
-      setPeople((prev) => {
-        const next = [...prev];
-        indices.forEach((idx, j) => {
-          next[idx] = result.people[j];
+      for (const batch of batches) {
+        if (!mountedRef.current) return;
+
+        const selectedPeople = batch.map((i) => people[i]);
+        const result = await apiPost<{ people: Person[]; skipped_count?: number }>(endpoint, {
+          people: selectedPeople,
         });
-        return next;
-      });
-      setNotFound((prev) => {
-        const next = new Set(prev);
-        indices.forEach((idx, j) => {
-          if (!result.people[j]?.[personField]) next.add(idx);
+
+        if (!mountedRef.current) return;
+
+        // Bounded by result.people.length no matter what the server sends
+        // back — a short/empty response for a row just leaves that row
+        // untouched instead of ever writing `undefined`/`null` into state.
+        setPeople((prev) => {
+          const next = [...prev];
+          batch.forEach((idx, j) => {
+            if (j < result.people.length) next[idx] = result.people[j];
+          });
+          return next;
         });
-        return next;
-      });
-      setSelected((prev) => {
-        const next = new Set(prev);
-        indices.forEach((i) => next.delete(i));
-        return next;
-      });
-      if (result.skipped_count) {
+        setNotFound((prev) => {
+          const next = new Set(prev);
+          batch.forEach((idx, j) => {
+            if (j < result.people.length && !result.people[j]?.[personField]) next.add(idx);
+          });
+          return next;
+        });
+        setSelected((prev) => {
+          const next = new Set(prev);
+          batch.forEach((i) => next.delete(i));
+          return next;
+        });
+        setRevealing((prev) => {
+          const next = new Set(prev);
+          batch.forEach((i) => next.delete(i));
+          return next;
+        });
+
+        totalSkipped += result.skipped_count ?? 0;
+        processed += batch.length;
+        if (batches.length > 1) setRevealProgress({ done: processed, total: indices.length });
+      }
+
+      if (totalSkipped > 0) {
         setRevealNotice(
-          `${result.skipped_count} of ${indices.length} skipped — not enough credits to reveal them too.`,
+          `${totalSkipped} of ${indices.length} skipped — not enough credits to reveal them too.`,
         );
       }
     } catch (err) {
-      setRevealError(err instanceof Error ? err.message : `${field === "email" ? "Email" : "Phone"} reveal failed`);
+      if (mountedRef.current) {
+        const message = err instanceof Error ? err.message : `${field === "email" ? "Email" : "Phone"} reveal failed`;
+        setRevealError(
+          processed > 0
+            ? `${message} (${processed} of ${indices.length} already revealed before this failed.)`
+            : message,
+        );
+      }
     } finally {
-      setRevealing((prev) => {
-        const next = new Set(prev);
-        indices.forEach((i) => next.delete(i));
-        return next;
-      });
+      if (mountedRef.current) {
+        setRevealing((prev) => {
+          const next = new Set(prev);
+          indices.forEach((i) => next.delete(i));
+          return next;
+        });
+        setRevealProgress(null);
+      }
     }
   }
 
   const findButton = (
-    <Button type="submit" variant="primary" className="w-100" disabled={!canSearch || loading}>
+    <Button type="submit" variant="primary" className="w-100" disabled={!canSearch || loading || revealBusy}>
       {loading ? (
         <>
           <Spinner animation="border" size="sm" className="me-2" />
@@ -325,7 +422,18 @@ export default function PeopleSearchPage() {
 
                     {error && <Alert variant="danger">{error}</Alert>}
 
-                    <Button type="submit" variant="primary" className="w-100" disabled={!sentence.trim() || loading}>
+                    {revealBusy && (
+                      <Alert variant="secondary" className="small py-2">
+                        Searching is paused until the current reveal finishes.
+                      </Alert>
+                    )}
+
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      className="w-100"
+                      disabled={!sentence.trim() || loading || revealBusy}
+                    >
                       {loading ? (
                         <>
                           <Spinner animation="border" size="sm" className="me-2" />
@@ -367,21 +475,34 @@ export default function PeopleSearchPage() {
                       value={countPerCompany}
                       onChange={setCountPerCompany}
                       min={1}
-                      max={50}
+                      max={countPerCompanyLimit}
                       helpText={
                         <>
-                          Up to {maxTotal} people · Estimated cost: <strong>{creditsForCount(maxTotal)}</strong>{" "}
-                          credit{creditsForCount(maxTotal) > 1 ? "s" : ""}
+                          Up to {countPerCompanyLimit} per company with {domains.length || 1} domain
+                          {domains.length === 1 ? "" : "s"} added · Up to {maxTotal} people total · Estimated cost:{" "}
+                          <strong>{creditsForCount(maxTotal)}</strong> credit{creditsForCount(maxTotal) > 1 ? "s" : ""}
                         </>
                       }
                     />
 
                     {error && <Alert variant="danger">{error}</Alert>}
 
-                    {canSearch ? (
+                    {revealBusy && (
+                      <Alert variant="secondary" className="small py-2">
+                        Searching is paused until the current reveal finishes.
+                      </Alert>
+                    )}
+
+                    {canSearch && !revealBusy ? (
                       findButton
                     ) : (
-                      <OverlayTrigger overlay={<Tooltip>Add at least one company domain</Tooltip>}>
+                      <OverlayTrigger
+                        overlay={
+                          <Tooltip>
+                            {revealBusy ? "Wait for the current reveal to finish" : "Add at least one company domain"}
+                          </Tooltip>
+                        }
+                      >
                         <span className="d-block">{findButton}</span>
                       </OverlayTrigger>
                     )}
@@ -406,13 +527,13 @@ export default function PeopleSearchPage() {
                         <Button
                           size="sm"
                           variant="primary"
-                          disabled={revealingEmailRows.size > 0}
+                          disabled={revealBusy}
                           onClick={() => reveal(Array.from(selected).sort((a, b) => a - b), "email")}
                         >
                           {revealingEmailRows.size > 0 ? (
                             <>
                               <Spinner animation="border" size="sm" className="me-1" />
-                              Revealing…
+                              {revealProgress ? `Revealing ${revealProgress.done} of ${revealProgress.total}…` : "Revealing…"}
                             </>
                           ) : (
                             `Reveal Email (${selected.size * 2} credits)`
@@ -421,13 +542,13 @@ export default function PeopleSearchPage() {
                         <Button
                           size="sm"
                           variant="primary"
-                          disabled={revealingPhoneRows.size > 0}
+                          disabled={revealBusy}
                           onClick={() => reveal(Array.from(selected).sort((a, b) => a - b), "phone")}
                         >
                           {revealingPhoneRows.size > 0 ? (
                             <>
                               <Spinner animation="border" size="sm" className="me-1" />
-                              Revealing…
+                              {revealProgress ? `Revealing ${revealProgress.done} of ${revealProgress.total}…` : "Revealing…"}
                             </>
                           ) : (
                             `Reveal Phone (${selected.size * 20} credits)`
@@ -515,7 +636,13 @@ export default function PeopleSearchPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {people.map((p, i) => (
+                        {people.map((p, i) => {
+                          // Defense in depth: a null/undefined entry should never reach this
+                          // array anymore (reveal() no longer writes one), but skipping it here
+                          // rather than crashing the render is a cheap, permanent guard against
+                          // whatever the next unrelated bug turns out to be.
+                          if (!p) return null;
+                          return (
                           <tr key={i}>
                             <td>
                               <input
@@ -572,7 +699,12 @@ export default function PeopleSearchPage() {
                               ) : notFoundEmailRows.has(i) ? (
                                 <span className="text-body-secondary">Not found</span>
                               ) : (
-                                <Button size="sm" variant="outline-primary" onClick={() => reveal([i], "email")}>
+                                <Button
+                                  size="sm"
+                                  variant="outline-primary"
+                                  disabled={revealBusy}
+                                  onClick={() => reveal([i], "email")}
+                                >
                                   Reveal
                                 </Button>
                               )}
@@ -585,13 +717,19 @@ export default function PeopleSearchPage() {
                               ) : notFoundPhoneRows.has(i) ? (
                                 <span className="text-body-secondary">Not found</span>
                               ) : (
-                                <Button size="sm" variant="outline-primary" onClick={() => reveal([i], "phone")}>
+                                <Button
+                                  size="sm"
+                                  variant="outline-primary"
+                                  disabled={revealBusy}
+                                  onClick={() => reveal([i], "phone")}
+                                >
                                   Reveal
                                 </Button>
                               )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import type { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import pino from "pino";
 import { pinoHttp } from "pino-http";
@@ -35,7 +36,11 @@ app.use(pinoHttp({ logger }));
 // consumes the body as parsed JSON, the original bytes are gone.
 app.use("/api", razorpayWebhookRouter);
 
-app.use(express.json());
+// 2mb comfortably covers the largest legitimate payload we send (a 50-row
+// reveal batch, capped client-side to match MAX_ROWS_PER_REQUEST) while
+// still rejecting anything pathological. Bumped from the 100kb default that
+// silently 413'd a 100-person reveal request before it reached any route.
+app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
@@ -63,6 +68,23 @@ app.use("/api", billingSubscriptionRouter);
 // the top of support/routes.ts before adding any middleware here.
 app.use("/api/support", supportRouter);
 app.use("/api/admin", adminRouter);
+
+// Catches express.json()'s body-parser failures (oversized or malformed
+// body) — without this, Express's default handler sends a bare
+// text/html error with no JSON body, and the frontend's apiPost (which
+// does `res.json().catch(() => ({}))`) can only fall back to a generic
+// "Request failed (413)" with no actionable detail.
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (err && typeof err === "object" && "type" in err && (err as { type?: string }).type === "entity.too.large") {
+    res.status(413).json({ error: "That request is too large — try selecting fewer rows at a time." });
+    return;
+  }
+  if (err instanceof SyntaxError && "status" in err && (err as { status?: number }).status === 400) {
+    res.status(400).json({ error: "Malformed request body." });
+    return;
+  }
+  next(err);
+});
 
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Alert, Badge, Button, Card, Container, Form, Modal, Spinner } from "react-bootstrap";
 import { ArrowLeft } from "react-bootstrap-icons";
@@ -44,6 +44,18 @@ interface RevealResult {
   skipped_count: number;
 }
 
+// Mirrors REVEAL_BATCH_SIZE / MAX_ROWS_PER_REQUEST in PeopleSearchPage.tsx
+// and revealFlow.ts — the backend now rejects any single request over this
+// count outright (rather than silently truncating it), so re-running enrich
+// on a large saved-list selection has to chunk client-side the same way.
+const REVEAL_BATCH_SIZE = 50;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size));
+  return batches;
+}
+
 export default function ListDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -65,6 +77,16 @@ export default function ListDetailPage() {
   const [revealingPhone, setRevealingPhone] = useState(false);
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
   const [revealError, setRevealError] = useState<string | null>(null);
+  const [revealProgress, setRevealProgress] = useState<{ done: number; total: number } | null>(null);
+  const revealBusy = revealingEmail || revealingPhone;
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   async function load() {
     if (!id) return;
@@ -154,22 +176,50 @@ export default function ListDetailPage() {
   }
 
   async function reRunEnrich(field: "email" | "phone") {
-    if (selected.size === 0) return;
+    if (selected.size === 0 || revealBusy) return;
     const setBusy = field === "email" ? setRevealingEmail : setRevealingPhone;
     const endpoint = field === "email" ? "/api/hv/list-email-reveal" : "/api/hv/list-phone-reveal";
 
     setBusy(true);
     setRevealError(null);
     setRevealNotice(null);
+
+    const ids = Array.from(selected);
+    const batches = chunk(ids, REVEAL_BATCH_SIZE);
+    setRevealProgress(batches.length > 1 ? { done: 0, total: ids.length } : null);
+
+    const totals: RevealResult = { updated_count: 0, already_done_count: 0, skipped_count: 0 };
+    let processed = 0;
+
     try {
-      const result = await apiPost<RevealResult>(endpoint, { list_item_ids: Array.from(selected) });
-      setRevealNotice(describeResult(field, result));
+      for (const batch of batches) {
+        if (!mountedRef.current) return;
+        const result = await apiPost<RevealResult>(endpoint, { list_item_ids: batch });
+        if (!mountedRef.current) return;
+        totals.updated_count += result.updated_count;
+        totals.already_done_count += result.already_done_count;
+        totals.skipped_count += result.skipped_count;
+        processed += batch.length;
+        if (batches.length > 1) setRevealProgress({ done: processed, total: ids.length });
+      }
+      setRevealNotice(describeResult(field, totals));
       setSelected(new Set());
       await load();
     } catch (err) {
-      setRevealError(err instanceof Error ? err.message : `${field === "email" ? "Email" : "Phone"} reveal failed`);
+      if (mountedRef.current) {
+        const message = err instanceof Error ? err.message : `${field === "email" ? "Email" : "Phone"} reveal failed`;
+        setRevealError(
+          processed > 0 ? `${message} (${processed} of ${ids.length} already processed before this failed.)` : message,
+        );
+      }
+      // Already-completed batches wrote real rows even though the sequence
+      // as a whole failed — refresh so the list reflects what actually went through.
+      if (processed > 0) await load();
     } finally {
-      setBusy(false);
+      if (mountedRef.current) {
+        setBusy(false);
+        setRevealProgress(null);
+      }
     }
   }
 
@@ -206,13 +256,13 @@ export default function ListDetailPage() {
                     <Button
                       size="sm"
                       variant="primary"
-                      disabled={revealingEmail}
+                      disabled={revealBusy}
                       onClick={() => reRunEnrich("email")}
                     >
                       {revealingEmail ? (
                         <>
                           <Spinner animation="border" size="sm" className="me-1" />
-                          Revealing…
+                          {revealProgress ? `Revealing ${revealProgress.done} of ${revealProgress.total}…` : "Revealing…"}
                         </>
                       ) : (
                         "Reveal Email (2 cr each)"
@@ -221,13 +271,13 @@ export default function ListDetailPage() {
                     <Button
                       size="sm"
                       variant="primary"
-                      disabled={revealingPhone}
+                      disabled={revealBusy}
                       onClick={() => reRunEnrich("phone")}
                     >
                       {revealingPhone ? (
                         <>
                           <Spinner animation="border" size="sm" className="me-1" />
-                          Revealing…
+                          {revealProgress ? `Revealing ${revealProgress.done} of ${revealProgress.total}…` : "Revealing…"}
                         </>
                       ) : (
                         "Reveal Phone (20 cr each)"

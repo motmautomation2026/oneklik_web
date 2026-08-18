@@ -160,6 +160,19 @@ async function holdCallResolve(
     if (n8nRes.ok) {
       const data: unknown = await n8nRes.json();
       responseRows = extractPersonRows(data);
+
+      // No PII here (no names/emails/phones) — just enough to catch a
+      // future recurrence of "n8n returned a differently-shaped/shorter
+      // response than what we sent" without needing to reach for a raw
+      // dump again. Rows below this count fall through to a normal
+      // "not found" outcome per-row, so this is purely a signal for
+      // debugging, not something the caller needs to act on.
+      if (responseRows.length !== toProcess.length) {
+        req.log.warn(
+          { requestedCount: toProcess.length, responseRowCount: responseRows.length },
+          `${config.providerName} webhook returned a different row count than requested`,
+        );
+      }
     } else {
       const bodyText = await n8nRes.text().catch(() => "");
       req.log.error(
@@ -281,10 +294,23 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
   }
 
   const body = (req.body ?? {}) as { people?: Person[] };
-  const people = Array.isArray(body.people) ? body.people.slice(0, MAX_ROWS_PER_REQUEST) : [];
+  const rawPeople = Array.isArray(body.people) ? body.people : [];
+  const people = rawPeople.slice(0, MAX_ROWS_PER_REQUEST);
 
   if (people.length === 0) {
     return res.status(400).json({ error: "Select at least one person to reveal" });
+  }
+
+  // The frontend is expected to chunk requests to MAX_ROWS_PER_REQUEST
+  // itself — this only fires if some caller doesn't, and it must be
+  // reported rather than silently dropped, or the caller ends up holding
+  // a shorter results array than the row count it selected. That mismatch
+  // is exactly what corrupted the People page's saved state in production
+  // (rows past the truncation point got written as `undefined`).
+  if (rawPeople.length > MAX_ROWS_PER_REQUEST) {
+    return res.status(400).json({
+      error: `Reveal at most ${MAX_ROWS_PER_REQUEST} people per request — select fewer rows or let the app batch them for you.`,
+    });
   }
 
   const userId = req.user!.id;
@@ -339,10 +365,17 @@ export async function runListRevealBatch(req: Request, res: Response, config: Re
   }
 
   const body = (req.body ?? {}) as { list_item_ids?: string[] };
-  const requestedIds = Array.isArray(body.list_item_ids) ? body.list_item_ids.slice(0, MAX_ROWS_PER_REQUEST) : [];
+  const rawIds = Array.isArray(body.list_item_ids) ? body.list_item_ids : [];
+  const requestedIds = rawIds.slice(0, MAX_ROWS_PER_REQUEST);
 
   if (requestedIds.length === 0) {
     return res.status(400).json({ error: "Select at least one row" });
+  }
+
+  if (rawIds.length > MAX_ROWS_PER_REQUEST) {
+    return res.status(400).json({
+      error: `Reveal at most ${MAX_ROWS_PER_REQUEST} rows per request — select fewer rows or let the app batch them for you.`,
+    });
   }
 
   const userId = req.user!.id;

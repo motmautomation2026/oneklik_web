@@ -3,13 +3,17 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { enforceAccountStatus } from "../middleware/accountStatus.js";
 import { supabaseAdmin } from "../lib/supabaseAdmin.js";
-import { getOrCreateScratchList, normalizePerson, type Person } from "../lib/revealFlow.js";
+import { normalizePerson, type Person } from "../lib/revealFlow.js";
 import { ensureSubscriptionCreditState } from "../lib/ensureSubscription.js";
+import { setLinkedinContactCache } from "../lib/linkedinContactCache.js";
 
 const router = Router();
 
 const MAX_URLS_PER_REQUEST = 50;
 
+// Profile lookup only — free. Email and phone are reveal-gated behind
+// /hv/linkedin-email-reveal and /hv/linkedin-phone-reveal so a user only
+// pays for the field they actually click to reveal, never both bundled.
 router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (req: Request, res: Response) => {
   const webhookUrl = process.env["linkedin_lookup_webhook"];
   if (!webhookUrl) {
@@ -42,18 +46,12 @@ router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (r
     return res.status(402).json({ error: "Add credits before running a LinkedIn lookup" });
   }
 
-  // Email and phone are always attempted — no opt-in toggle. The lookup
-  // itself is free; only a found email/phone gets billed below.
   let people: Person[] = [];
   try {
     const n8nRes = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        linkedin_urls: linkedinUrls,
-        include_email: true,
-        include_phone: true,
-      }),
+      body: JSON.stringify({ linkedin_urls: linkedinUrls }),
     });
 
     if (!n8nRes.ok) {
@@ -73,158 +71,38 @@ router.post("/hv/linkedin-lookup", requireAuth, enforceAccountStatus(), async (r
         : Array.isArray((data as Record<string, unknown>)?.data)
           ? ((data as Record<string, unknown>).data as unknown[])
           : [];
+    // n8n's free-lookup branch already paid SalesQL for whatever email/phone
+    // came back as a byproduct of the profile match, and hands it back here
+    // as hidden _WORK_EMAIL / _PHONE_RAW fields (never as EMAIL/PHONE, which
+    // stay blank). Cache it per-user for a short window so a reveal click
+    // for the same profile can skip re-paying a provider for the same data
+    // — see linkedinContactCache.ts for why this is intentionally in-memory
+    // and short-lived rather than a database table.
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      const linkedinUrl = typeof r["USER SOCIAL"] === "string" ? (r["USER SOCIAL"] as string) : "";
+      const workEmail = typeof r["_WORK_EMAIL"] === "string" ? (r["_WORK_EMAIL"] as string) : "";
+      const phone = typeof r["_PHONE_RAW"] === "string" ? (r["_PHONE_RAW"] as string) : "";
+      if (linkedinUrl && (workEmail || phone)) {
+        setLinkedinContactCache(userId, linkedinUrl, { workEmail, phone });
+      }
+    }
+
     people = rows
       .map((row) => normalizePerson(row as Record<string, unknown>))
       .filter((p) => p["FULL NAME"].length > 0)
-      .slice(0, linkedinUrls.length);
+      .slice(0, linkedinUrls.length)
+      // Defense in depth: strip contact fields even if the provider response
+      // happens to include them — this endpoint must never bill or surface
+      // Email/Phone, only the dedicated reveal endpoints do.
+      .map((p) => ({ ...p, Email: "", Phone: "" }));
   } catch (err) {
     req.log.error({ err }, "linkedin-lookup webhook call failed");
     return res.status(502).json({ error: "LinkedIn lookup provider failed" });
   }
 
-  if (people.length === 0) {
-    return res.json({ people });
-  }
-
-  const listId = await getOrCreateScratchList(req, userId, "people");
-  if (!listId) {
-    // Lookup already succeeded and nothing has been billed yet — safe to
-    // still return the (unbilled, so redacted) profiles rather than fail.
-    return res.json({ people: people.map((p) => ({ ...p, Email: "", Phone: "" })) });
-  }
-
-  const { data: listItems, error: itemsError } = await supabaseAdmin
-    .from("list_items")
-    .insert(people.map((p) => ({ list_id: listId, user_id: userId, data: p })))
-    .select("id");
-
-  if (itemsError || !listItems || listItems.length !== people.length) {
-    req.log.error({ err: itemsError }, "failed to create list_items for linkedin lookup");
-    return res.json({ people: people.map((p) => ({ ...p, Email: "", Phone: "" })), list_id: listId });
-  }
-
-  const confirmedListItems = listItems;
-
-  // Bills a found field (Email or Phone) as an ordinary reveal run — but
-  // only for as many rows as the wallet can actually afford, checked
-  // upfront. Holding the whole batch's worst-case in one shot meant "2
-  // credits available, 2 rows at 2cr each" held for 4, failed outright, and
-  // revealed nothing — even though one of those two might have been
-  // affordable on its own. Processes rows in order and stops once the
-  // budget runs out; returns which rows were actually attempted so the
-  // caller can redact just the skipped ones, not the whole field.
-  async function chargeField(
-    field: "Email" | "Phone",
-    creditsEach: number,
-    runType: "email_enrich" | "mobile_enrich",
-  ): Promise<boolean[]> {
-    const attempted = new Array(people.length).fill(false);
-
-    const { data: wallet } = await supabaseAdmin
-      .from("credit_wallets")
-      .select("available_balance")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const availableBalance = wallet?.available_balance ?? 0;
-    const maxAffordable = Math.min(people.length, Math.floor(availableBalance / creditsEach));
-
-    if (maxAffordable === 0) {
-      return attempted;
-    }
-
-    const { data: chargeRun, error: chargeRunError } = await supabaseAdmin
-      .from("enrichment_runs")
-      .insert({
-        user_id: userId,
-        list_id: listId,
-        run_type: runType,
-        status: "pending",
-        requested_count: maxAffordable,
-      })
-      .select("id")
-      .single();
-
-    if (chargeRunError || !chargeRun) {
-      req.log.error({ err: chargeRunError }, `failed to create ${runType} run for linkedin lookup`);
-      return attempted;
-    }
-
-    const chargeRunId = chargeRun.id as string;
-    const { error: holdError } = await supabaseAdmin.rpc("fn_hold_credits", {
-      p_user_id: userId,
-      p_run_id: chargeRunId,
-      p_amount: maxAffordable * creditsEach,
-    });
-
-    if (holdError) {
-      await supabaseAdmin
-        .from("enrichment_runs")
-        .update({ status: "failed", completed_at: new Date().toISOString() })
-        .eq("id", chargeRunId);
-      return attempted;
-    }
-
-    for (let i = 0; i < maxAffordable; i++) {
-      const found = Boolean(people[i][field]);
-      const outcome = found ? "found" : "not_found";
-
-      await supabaseAdmin.from("enrichment_results").insert({
-        run_id: chargeRunId,
-        list_item_id: confirmedListItems[i].id,
-        user_id: userId,
-        provider: field === "Email" ? "email_finder" : "phone_finder",
-        outcome,
-        cost: 0,
-      });
-
-      const { error: rowResolveError } = await supabaseAdmin.rpc("fn_resolve_row", {
-        p_run_id: chargeRunId,
-        p_list_item_id: confirmedListItems[i].id,
-        p_outcome: outcome,
-        p_credits: creditsEach,
-      });
-
-      if (rowResolveError) {
-        req.log.error({ err: rowResolveError }, `failed to resolve ${field} charge row from linkedin lookup`);
-      }
-
-      attempted[i] = true;
-    }
-
-    return attempted;
-  }
-
-  const emailAttempted = await chargeField("Email", 2, "email_enrich");
-  const phoneAttempted = await chargeField("Phone", 20, "mobile_enrich");
-
-  const finalPeople = people.map((p, i) => ({
-    ...p,
-    Email: emailAttempted[i] ? p.Email : "",
-    Phone: phoneAttempted[i] ? p.Phone : "",
-  }));
-
-  const emailSkippedCount = emailAttempted.filter((a) => !a).length;
-  const phoneSkippedCount = phoneAttempted.filter((a) => !a).length;
-
-  if (emailSkippedCount > 0 || phoneSkippedCount > 0) {
-    await supabaseAdmin
-      .from("list_items")
-      .upsert(
-        confirmedListItems.map((item, i) => ({
-          id: item.id,
-          list_id: listId,
-          user_id: userId,
-          data: finalPeople[i],
-        })),
-      );
-  }
-
-  return res.json({
-    people: finalPeople,
-    list_id: listId,
-    email_skipped_count: emailSkippedCount,
-    phone_skipped_count: phoneSkippedCount,
-  });
+  return res.json({ people });
 });
 
 export default router;

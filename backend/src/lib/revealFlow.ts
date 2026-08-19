@@ -30,6 +30,19 @@ function pickFirstNonEmpty(...values: unknown[]): string {
   return "";
 }
 
+// Convention: a caller (e.g. linkedinEmailReveal.ts) may attach extra
+// underscore-prefixed fields to a person before it's sent to the provider
+// webhook — wire-only hints such as a locally cached value, never part of
+// the Person shape itself. Stripped before anything reaches list_items so a
+// hint never ends up persisted alongside the real, billed result.
+function stripHiddenFields(person: Person): Person {
+  const clean = {} as Record<string, unknown>;
+  for (const [key, value] of Object.entries(person)) {
+    if (!key.startsWith("_")) clean[key] = value;
+  }
+  return clean as unknown as Person;
+}
+
 // Shared by People Search and LinkedIn Lookup — both receive rows from n8n
 // in this same loose shape and need the same tolerant key-casing lookup.
 export function normalizePerson(row: Record<string, unknown>): Person {
@@ -196,7 +209,7 @@ async function holdCallResolve(
 
     const value = batchFailed ? "" : pickFirstNonEmpty(...fieldCandidates.map((key) => row?.[key]));
     const outcome: "found" | "not_found" | "error" = batchFailed ? "error" : value ? "found" : "not_found";
-    const updatedPerson: Person = { ...item.person, [config.targetField]: value };
+    const updatedPerson: Person = stripHiddenFields({ ...item.person, [config.targetField]: value });
 
     await supabaseAdmin.from("enrichment_results").insert({
       run_id: runId,
@@ -322,7 +335,7 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
 
   const { data: listItems, error: itemsError } = await supabaseAdmin
     .from("list_items")
-    .insert(people.map((p) => ({ list_id: listId, user_id: userId, data: p })))
+    .insert(people.map((p) => ({ list_id: listId, user_id: userId, data: stripHiddenFields(p) })))
     .select("id");
 
   if (itemsError || !listItems || listItems.length !== people.length) {
@@ -345,13 +358,17 @@ export async function runRevealBatch(req: Request, res: Response, config: Reveal
   if (result.affordableCount === 0) {
     return res.status(402).json({
       error: `Not enough credits — need at least ${config.creditsPerReveal} to reveal even one.`,
-      people,
+      people: people.map(stripHiddenFields),
       skipped_count: items.length,
     });
   }
 
+  // Falls back to the original request-side person for any row holdCallResolve
+  // never resolved (e.g. skipped for affordability) — stripped the same as a
+  // resolved row, so an unbilled row can never carry a wire-only hint (like a
+  // cached reveal value) back out to the caller.
   const resolvedMap = new Map(result.resolved.map((r) => [r.id, r.person]));
-  const finalResults = items.map((item) => resolvedMap.get(item.id) ?? item.person);
+  const finalResults = items.map((item) => resolvedMap.get(item.id) ?? stripHiddenFields(item.person));
 
   return res.json({ people: finalResults, list_id: listId, skipped_count: result.creditSkippedCount });
 }

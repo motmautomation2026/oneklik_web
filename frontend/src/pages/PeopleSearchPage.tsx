@@ -278,7 +278,8 @@ export default function PeopleSearchPage() {
   // a large reveal doesn't throw a burst of simultaneous large requests at
   // the enrichment provider.
   async function reveal(indices: number[], field: "email" | "phone") {
-    if (indices.length === 0 || revealBusy) return;
+    const revealingSet = field === "email" ? revealingEmailRows : revealingPhoneRows;
+    if (indices.length === 0 || indices.some((i) => revealingSet.has(i))) return;
     const setRevealing = field === "email" ? setRevealingEmailRows : setRevealingPhoneRows;
     const setNotFound = field === "email" ? setNotFoundEmailRows : setNotFoundPhoneRows;
     const personField = field === "email" ? "Email" : "Phone";
@@ -286,7 +287,7 @@ export default function PeopleSearchPage() {
 
     setRevealError(null);
     setRevealNotice(null);
-    setRevealing(new Set(indices));
+    setRevealing((prev) => new Set([...prev, ...indices]));
 
     const batches = chunk(indices, REVEAL_BATCH_SIZE);
     setRevealProgress(batches.length > 1 ? { done: 0, total: indices.length } : null);
@@ -527,7 +528,7 @@ export default function PeopleSearchPage() {
                         <Button
                           size="sm"
                           variant="primary"
-                          disabled={revealBusy}
+                          disabled={revealingEmailRows.size > 0}
                           onClick={() => reveal(Array.from(selected).sort((a, b) => a - b), "email")}
                         >
                           {revealingEmailRows.size > 0 ? (
@@ -542,7 +543,7 @@ export default function PeopleSearchPage() {
                         <Button
                           size="sm"
                           variant="primary"
-                          disabled={revealBusy}
+                          disabled={revealingPhoneRows.size > 0}
                           onClick={() => reveal(Array.from(selected).sort((a, b) => a - b), "phone")}
                         >
                           {revealingPhoneRows.size > 0 ? (
@@ -702,7 +703,6 @@ export default function PeopleSearchPage() {
                                 <Button
                                   size="sm"
                                   variant="outline-primary"
-                                  disabled={revealBusy}
                                   onClick={() => reveal([i], "email")}
                                 >
                                   Reveal
@@ -720,7 +720,6 @@ export default function PeopleSearchPage() {
                                 <Button
                                   size="sm"
                                   variant="outline-primary"
-                                  disabled={revealBusy}
                                   onClick={() => reveal([i], "phone")}
                                 >
                                   Reveal

@@ -78,7 +78,6 @@ export default function ListDetailPage() {
   const [revealNotice, setRevealNotice] = useState<string | null>(null);
   const [revealError, setRevealError] = useState<string | null>(null);
   const [revealProgress, setRevealProgress] = useState<{ done: number; total: number } | null>(null);
-  const revealBusy = revealingEmail || revealingPhone;
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -176,7 +175,7 @@ export default function ListDetailPage() {
   }
 
   async function reRunEnrich(field: "email" | "phone") {
-    if (selected.size === 0 || revealBusy) return;
+    if (selected.size === 0 || (field === "email" ? revealingEmail : revealingPhone)) return;
     const setBusy = field === "email" ? setRevealingEmail : setRevealingPhone;
     const endpoint = field === "email" ? "/api/hv/list-email-reveal" : "/api/hv/list-phone-reveal";
 
@@ -256,7 +255,7 @@ export default function ListDetailPage() {
                     <Button
                       size="sm"
                       variant="primary"
-                      disabled={revealBusy}
+                      disabled={revealingEmail}
                       onClick={() => reRunEnrich("email")}
                     >
                       {revealingEmail ? (
@@ -271,7 +270,7 @@ export default function ListDetailPage() {
                     <Button
                       size="sm"
                       variant="primary"
-                      disabled={revealBusy}
+                      disabled={revealingPhone}
                       onClick={() => reRunEnrich("phone")}
                     >
                       {revealingPhone ? (

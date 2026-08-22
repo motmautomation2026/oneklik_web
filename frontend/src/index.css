@@ -306,6 +306,119 @@ label.text-uppercase,
   padding-bottom: 0.55rem;
 }
 
+/* ── Chrome extension panel: download + install guide ──────────────── */
+
+.extension-panel .ext-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  color: var(--brand-600);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+}
+
+.extension-panel .ext-version {
+  font-size: 0.7rem;
+  font-weight: 500;
+  border: 1px solid var(--brand-100);
+}
+
+.extension-panel .ext-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.extension-panel .ext-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.extension-panel .ext-step-num {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  color: var(--brand-700);
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Nudge onto the title's baseline row rather than the top of the line box. */
+  margin-top: 1px;
+}
+
+.extension-panel .ext-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.extension-panel .ext-step-title {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.extension-panel .ext-step-detail {
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+}
+
+.extension-panel .ext-step-detail code,
+.extension-panel .ext-url-chip code {
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  color: var(--brand-700);
+  font-size: 0.9em;
+  /* Long folder names must not push the card into horizontal scroll. */
+  word-break: break-all;
+}
+
+.extension-panel .ext-url-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.extension-panel .ext-copy-btn {
+  font-size: 0.72rem;
+  padding: 0 0.25rem;
+  text-decoration: none;
+  vertical-align: baseline;
+}
+
+.extension-panel .ext-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-top: 1.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 6px;
+  background: var(--brand-50);
+  border: 1px solid var(--brand-100);
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+}
+
 /* ── Sidebar: collapsible left nav ─────────────────────────────────── */
 
 .app-sidebar {

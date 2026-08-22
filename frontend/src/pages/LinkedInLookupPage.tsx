@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Alert, Badge, Button, Card, Col, Container, Form, Modal, Row, Spinner, Toast, ToastContainer } from "react-bootstrap";
+import { Alert, Badge, Button, Card, Col, Container, Form, Modal, Nav, Row, Spinner, Toast, ToastContainer } from "react-bootstrap";
 import { Linkedin } from "react-bootstrap-icons";
+import { useSearchParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
+import ChromeExtensionPanel from "../components/ChromeExtensionPanel";
 import TagInput from "../components/TagInput";
 import { apiPost } from "../lib/api";
 import { supabase } from "../lib/supabaseClient";
@@ -38,8 +40,22 @@ function chunk<T>(items: T[], size: number): T[][] {
   return batches;
 }
 
+type LookupTab = "lookup" | "extension";
+
 export default function LinkedInLookupPage() {
   const { user } = useAuth();
+
+  // Kept in the URL rather than component state so support can link someone
+  // straight to the install guide with /linkedin-lookup?tab=extension.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: LookupTab = searchParams.get("tab") === "extension" ? "extension" : "lookup";
+
+  function selectTab(next: LookupTab) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "extension") params.set("tab", "extension");
+    else params.delete("tab");
+    setSearchParams(params, { replace: true });
+  }
 
   const [urls, setUrls] = useSessionStorageState<string[]>("linkedinLookup.urls", []);
 
@@ -272,7 +288,37 @@ export default function LinkedInLookupPage() {
   return (
     <AppLayout>
       <Container fluid className="py-4 px-3 px-md-4">
-        <h1 className="h4 mb-4 text-primary">LinkedIn Lookup</h1>
+        <h1 className="h4 mb-3 text-primary">LinkedIn Lookup</h1>
+
+        <Nav variant="tabs" className="mb-4">
+          <Nav.Item>
+            <Nav.Link active={tab === "lookup"} onClick={() => selectTab("lookup")} role="button">
+              Lookup Manually
+            </Nav.Link>
+          </Nav.Item>
+          <Nav.Item>
+            <Nav.Link
+              active={tab === "extension"}
+              onClick={() => selectTab("extension")}
+              role="button"
+              className="d-flex align-items-center gap-2"
+            >
+              Chrome Extension
+              <Badge bg="success">NEW</Badge>
+            </Nav.Link>
+          </Nav.Item>
+        </Nav>
+
+        {tab === "extension" && <ChromeExtensionPanel />}
+
+        {/*
+          Hidden rather than unmounted. A reveal in flight keeps running and
+          still bills credits after unmount, but the mountedRef guards in
+          reveal() drop the result — so switching tabs mid-reveal would charge
+          the user for data they never see. Everything below is also plain
+          useState (selection, per-row spinners) and would be lost too.
+        */}
+        <div className={tab === "lookup" ? undefined : "d-none"}>
         <Row className="g-4">
           <Col xs={12} lg={3}>
             <Card className="shadow-sm border-primary-subtle filter-panel">
@@ -533,6 +579,7 @@ export default function LinkedInLookupPage() {
             </Card>
           </Col>
         </Row>
+        </div>
       </Container>
 
       <Modal show={showSaveModal} onHide={() => setShowSaveModal(false)}>

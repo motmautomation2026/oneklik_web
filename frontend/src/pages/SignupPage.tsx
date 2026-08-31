@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, Form } from "react-bootstrap";
 import { supabase } from "../lib/supabaseClient";
 import { authErrorMessage } from "../lib/authErrorMessage";
+import { isPersonalEmail } from "../lib/personalEmailDomains";
 import AuthLayout from "../components/AuthLayout";
 
 export default function SignupPage() {
@@ -15,6 +16,10 @@ export default function SignupPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (isPersonalEmail(email)) {
+      setError("Please sign up with your work email address.");
+      return;
+    }
     setSubmitting(true);
     const { error } = await supabase.auth.signUp({ email, password });
     setSubmitting(false);

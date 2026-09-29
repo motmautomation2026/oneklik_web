@@ -2,7 +2,11 @@ import type { Request, Response } from "express";
 import { supabaseAdmin } from "./supabaseAdmin.js";
 import { ensureSubscriptionCreditState } from "./ensureSubscription.js";
 
-const MAX_ROWS_PER_REQUEST = 50;
+// Configurable via env so ops can tune it without a code change — e.g. to
+// work around a provider-side batching quirk without a redeploy. Falls back
+// to 50 for any unset/invalid value.
+const envBatchSize = Number(process.env["REVEAL_BATCH_SIZE"]);
+const MAX_ROWS_PER_REQUEST = Number.isInteger(envBatchSize) && envBatchSize > 0 ? envBatchSize : 50;
 
 export interface Person {
   "FULL NAME": string;
@@ -167,7 +171,14 @@ async function holdCallResolve(
     const n8nRes = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ people: toProcess.map((i) => i.person) }),
+      // Tags each person with its position in this batch so the response
+      // can be matched back by that tag rather than by array position —
+      // n8n's internal split/merge for the provider waterfall isn't
+      // guaranteed to preserve input order once a batch is large enough to
+      // actually get split, and a silent reorder here means row i's result
+      // gets written to the wrong person with no error anywhere. Stripped
+      // by stripHiddenFields before anything is persisted or returned.
+      body: JSON.stringify({ people: toProcess.map((i, idx) => ({ ...i.person, _ROW_INDEX: idx })) }),
     });
 
     if (n8nRes.ok) {
@@ -203,9 +214,21 @@ async function holdCallResolve(
     config.targetField === "Email" ? ["Email", "email", "EMAIL"] : ["Phone", "phone", "PHONE"];
   const resolved: ListItemRef[] = [];
 
+  // Prefer matching by the _ROW_INDEX tag we sent (see above) over raw
+  // array position, so a batch n8n returns out of order still resolves
+  // each row against the right person. Only rows with a valid, in-range
+  // tag go in the map — anything else falls through to the old positional
+  // lookup below, so a webhook that doesn't echo the tag back still works
+  // exactly as before.
+  const rowsByIndex = new Map<number, Record<string, unknown>>();
+  for (const row of responseRows) {
+    const idx = Number(row?.["_ROW_INDEX"]);
+    if (Number.isInteger(idx) && idx >= 0 && idx < toProcess.length) rowsByIndex.set(idx, row);
+  }
+
   for (let i = 0; i < toProcess.length; i++) {
     const item = toProcess[i];
-    const row = responseRows[i];
+    const row = rowsByIndex.get(i) ?? responseRows[i];
 
     const value = batchFailed ? "" : pickFirstNonEmpty(...fieldCandidates.map((key) => row?.[key]));
     const outcome: "found" | "not_found" | "error" = batchFailed ? "error" : value ? "found" : "not_found";

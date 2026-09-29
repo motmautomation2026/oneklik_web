@@ -48,7 +48,8 @@ interface RevealResult {
 // and revealFlow.ts — the backend now rejects any single request over this
 // count outright (rather than silently truncating it), so re-running enrich
 // on a large saved-list selection has to chunk client-side the same way.
-const REVEAL_BATCH_SIZE = 50;
+const envRevealBatchSize = Number(import.meta.env.VITE_REVEAL_BATCH_SIZE);
+const REVEAL_BATCH_SIZE = Number.isInteger(envRevealBatchSize) && envRevealBatchSize > 0 ? envRevealBatchSize : 50;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = [];

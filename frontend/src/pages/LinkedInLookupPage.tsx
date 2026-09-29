@@ -32,7 +32,8 @@ interface Person {
 // Mirrors the backend's MAX_ROWS_PER_REQUEST (revealFlow.ts) — kept as a
 // named constant so the reveal batch size this page uses can't drift out of
 // sync with what the server actually allows.
-const REVEAL_BATCH_SIZE = 50;
+const envRevealBatchSize = Number(import.meta.env.VITE_REVEAL_BATCH_SIZE);
+const REVEAL_BATCH_SIZE = Number.isInteger(envRevealBatchSize) && envRevealBatchSize > 0 ? envRevealBatchSize : 50;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = [];

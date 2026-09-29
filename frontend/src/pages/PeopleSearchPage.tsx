@@ -56,7 +56,8 @@ function creditsForCount(count: number): number {
 const TOTAL_PEOPLE_CAP = 200;
 const MIN_COUNT_PER_COMPANY = 5;
 const ABSOLUTE_MAX_COUNT_PER_COMPANY = 50;
-const REVEAL_BATCH_SIZE = 50;
+const envRevealBatchSize = Number(import.meta.env.VITE_REVEAL_BATCH_SIZE);
+const REVEAL_BATCH_SIZE = Number.isInteger(envRevealBatchSize) && envRevealBatchSize > 0 ? envRevealBatchSize : 50;
 
 // More domains means less headroom per domain, so the per-company cap
 // shrinks as you add domains instead of letting the total silently blow

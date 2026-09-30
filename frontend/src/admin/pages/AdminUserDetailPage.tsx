@@ -27,6 +27,7 @@ import { formatDateTime, formatInrFromMinorUnits, formatNumber } from "../format
 import { useAdminResource } from "../hooks/useAdminResource";
 import { ADMIN_CHART_COLORS } from "../theme";
 import type { AdminInvoiceRow, LedgerEntry, PaymentRow } from "../types";
+import { formatPhone } from "../../lib/phone";
 
 const LEDGER_PAGE_SIZE = 25;
 const MODERATION_PAGE_SIZE = 25;
@@ -245,6 +246,7 @@ export default function AdminUserDetailPage() {
     user,
     role,
     use_case,
+    phone,
     status_reason,
     flags,
     lists,
@@ -291,7 +293,8 @@ export default function AdminUserDetailPage() {
           <p className="mb-0 small" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>
             {user.company ?? "No company"}
             {role ? ` · ${role}` : ""}
-            {use_case ? ` · ${use_case}` : ""} · Signed up {formatDateTime(user.created_at)}
+            {use_case ? ` · ${use_case}` : ""}
+            {phone ? ` · ${formatPhone(phone)}` : ""} · Signed up {formatDateTime(user.created_at)}
           </p>
           {status_reason && (
             <p className="mb-0 small mt-1" style={{ color: ADMIN_CHART_COLORS.ink.secondary }}>

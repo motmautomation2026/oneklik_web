@@ -4,6 +4,7 @@ import AppLayout from "../components/AppLayout";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import { useAuth } from "../lib/AuthProvider";
 import { supabase } from "../lib/supabaseClient";
+import { formatPhone } from "../lib/phone";
 
 function initialsFromEmail(email: string | null | undefined): string {
   if (!email) return "?";
@@ -50,6 +51,9 @@ export default function ProfilePage() {
                 <dl className="row mb-0">
                   <dt className="col-sm-4 text-body-secondary fw-normal">Email</dt>
                   <dd className="col-sm-8">{user?.email}</dd>
+
+                  <dt className="col-sm-4 text-body-secondary fw-normal">Mobile</dt>
+                  <dd className="col-sm-8">{profile?.phone ? formatPhone(profile.phone) : "Not provided"}</dd>
 
                   <dt className="col-sm-4 text-body-secondary fw-normal">Company</dt>
                   <dd className="col-sm-8">{fieldOrFallback(profile?.company)}</dd>

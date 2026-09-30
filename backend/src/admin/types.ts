@@ -369,6 +369,7 @@ export interface UserDetail {
   user: AdminUserRow;
   role: string | null;
   use_case: string | null;
+  phone: string | null;
   status_reason: string | null;
   /** Open flags only (for review alerts); capped for safety. */
   flags: FlaggedAccountRow[];

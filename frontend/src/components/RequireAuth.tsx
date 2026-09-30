@@ -50,7 +50,12 @@ export default function RequireAuth({
     );
   }
 
-  if (requireOnboarded && profile && !profile.company) return <Navigate to="/onboarding" replace />;
+  // Mobile became mandatory after launch (0024), so users who onboarded
+  // before that are sent back once to add it; OnboardingPage pre-fills what
+  // they already gave us.
+  if (requireOnboarded && profile && (!profile.company || !profile.phone)) {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   return <>{children}</>;
 }

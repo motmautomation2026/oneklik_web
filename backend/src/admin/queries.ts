@@ -766,11 +766,12 @@ export async function getUseCaseBreakdown(): Promise<UseCaseBreakdownEntry[]> {
 }
 
 const USER_DETAIL_SELECT =
-  "id, email, company, role, use_case, created_at, account_status, suspended_until, status_reason, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
+  "id, email, company, role, use_case, phone, created_at, account_status, suspended_until, status_reason, credit_wallets(available_balance, held_balance, lifetime_purchased, lifetime_consumed)";
 
 interface ProfileDetailRow extends ProfileWithWallet {
   role: string | null;
   use_case: string | null;
+  phone: string | null;
   status_reason: string | null;
 }
 
@@ -862,6 +863,7 @@ export async function getUserDetail(userId: string): Promise<UserDetail | null> 
     user,
     role: typedProfile.role,
     use_case: typedProfile.use_case,
+    phone: typedProfile.phone,
     status_reason: typedProfile.status_reason,
     flags,
     flags_total: flagsTotal,

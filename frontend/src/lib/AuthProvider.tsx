@@ -8,6 +8,7 @@ export interface Profile {
   company: string | null;
   role: string | null;
   use_case: string | null;
+  phone: string | null;
   is_admin: boolean;
   account_status: AccountStatus;
   suspended_until: string | null;
@@ -32,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadProfile(userId: string) {
     const { data } = await supabase
       .from("profiles")
-      .select("id, company, role, use_case, is_admin, account_status, suspended_until, status_reason")
+      .select("id, company, role, use_case, phone, is_admin, account_status, suspended_until, status_reason")
       .eq("id", userId)
       .maybeSingle();
     setProfile(data);
